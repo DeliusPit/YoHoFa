@@ -18,6 +18,9 @@ services:
       timeout: 5s
       retries: 5
 
+    ports:
+      - "5432:5432"
+
     networks:
       - geldzaken-backend
 
@@ -55,16 +58,12 @@ services:
     environment:
       APP_ENV: production
       HTTP_ADDR: :8080
-      STORE_BACKEND: sqlite
-      DATABASE_PATH: /data/geldzaken.db
+      STORE_BACKEND: postgres
       WEB_DIR: /app/web/dist
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-
-    volumes:
-      - ./data/sqlite:/data
 
     depends_on:
       postgres:

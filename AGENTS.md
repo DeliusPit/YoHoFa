@@ -4,7 +4,7 @@ Personal-finance app ("Geldzaken").
 
 The active application is the root Go module with `cmd/api` as the backend entrypoint and `web/` as the Vite frontend.
 
-The application currently runs with SQLite. Docker Compose also starts PostgreSQL and MinIO, but the application does not use them yet.
+The application currently runs with PostgreSQL. Docker Compose also starts MinIO, but the application does not use MinIO yet.
 
 ## Current architecture
 
@@ -15,8 +15,8 @@ The application currently runs with SQLite. Docker Compose also starts PostgreSQ
 - `compose.yml` is the current Docker Compose runtime definition.
 - `backend/` is an older temporary stub and is not the current application backend.
 - `frontend/` is not used by the current application.
-- SQLite is the current working database backend.
-- PostgreSQL is available but not yet functionally complete.
+- PostgreSQL is the current working database backend.
+- SQLite code may remain temporarily during verified migration cleanup, but it is not the active Compose backend.
 - MinIO is available but not yet used by application code.
 
 ## Run the stack
@@ -33,7 +33,7 @@ The application currently runs with SQLite. Docker Compose also starts PostgreSQ
 - Compose builds the real application from the repository-root `Dockerfile`, not `backend/Dockerfile`.
 - The API serves the built frontend from `WEB_DIR` on port `8080`.
 - PostgreSQL and MinIO are available on the `geldzaken-backend` Docker network.
-- While `STORE_BACKEND=sqlite`, PostgreSQL and MinIO are not used by the application.
+- The application uses PostgreSQL through `STORE_BACKEND=postgres`; MinIO is not used by the application yet.
 - Persistent runtime data is stored outside the application container.
 
 ## Backend
@@ -55,10 +55,9 @@ The application currently runs with SQLite. Docker Compose also starts PostgreSQ
 
 ## Database
 
-- SQLite is the current working baseline.
-- The application must remain functional with SQLite until the PostgreSQL migration is complete.
-- PostgreSQL is the target relational database.
-- Do not remove SQLite support until PostgreSQL provides equivalent functionality and the migration has been verified.
+- PostgreSQL is the current working baseline.
+- SQLite support was the previous baseline and should only be removed after PostgreSQL runtime verification remains successful.
+- PostgreSQL is the relational database.
 - PostgreSQL schema changes belong in `migrations/`.
 - Keep application store behavior consistent across database implementations while both backends exist.
 - Do not silently change database semantics, constraints or seed behavior.

@@ -21,7 +21,7 @@ func FromEnv() Config {
 	return Config{
 		AppEnv:       env("APP_ENV", "development"),
 		HTTPAddr:     env("HTTP_ADDR", ":8080"),
-		StoreBackend: env("STORE_BACKEND", "sqlite"),
+		StoreBackend: env("STORE_BACKEND", "postgres"),
 		DatabaseURL:  env("DATABASE_URL", "postgres://geldzaken:geldzaken@localhost:5432/geldzaken?sslmode=disable"),
 		DatabasePath: env("DATABASE_PATH", "data/geldzaken.db"),
 		CORSOrigin:   env("CORS_ORIGIN", "http://localhost:5173"),

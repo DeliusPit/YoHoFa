@@ -10,10 +10,9 @@ Een zo veel mogelijk in Go geschreven applicatie met een kleine JavaScript front
 
 - Backend: Go HTTP API
 - Frontend: Vite + vanilla JavaScript
-- Data tijdens lokale ontwikkeling en productie: SQLite
-- Optioneel later: PostgreSQL
-- SQLite schema: automatische schema-aanmaak bij starten
-- Postgres schema: SQL-bestanden in `migrations/` voor later
+- Data tijdens lokale ontwikkeling en productie: PostgreSQL
+- Vorige opslaglaag: SQLite, alleen nog aanwezig voor migratie/fallback zolang cleanup niet is afgerond
+- PostgreSQL schema: SQL-bestanden in `migrations/` en schema-check bij starten
 - Lokaal draaien: Go API + Vite frontend
 - Deployment: build artifact + systemd service in LXC
 
@@ -28,14 +27,15 @@ Een zo veel mogelijk in Go geschreven applicatie met een kleine JavaScript front
 - `deploy`: systemd en Proxmox/LXC deployment-opbouw
 - `scripts`: hulpscripts voor lokale en remote taken
 
-## Lokaal ontwikkelen met SQLite
+## Lokaal ontwikkelen met PostgreSQL
 
 Vereisten: Go en Node.js.
 
-De standaardconfiguratie gebruikt `STORE_BACKEND=sqlite` met databasebestand `data/geldzaken.db`. Daarmee kun je de API en frontend ontwikkelen zonder losse databaseserver.
+De standaardconfiguratie gebruikt `STORE_BACKEND=postgres` met `DATABASE_URL`. Via Docker Compose draait PostgreSQL naast de applicatie.
 
 ```sh
 cp .env.example .env
+docker compose up -d postgres
 ./scripts/dev-api.sh
 ```
 
@@ -65,17 +65,15 @@ Snelle lokale check met tijdelijke SQLite database:
 ./scripts/check-local.sh
 ```
 
-## Lokaal met Postgres
+## Docker Compose
 
-Als je de echte database wilt testen:
+De applicatiecontainer bouwt de Go API uit `cmd/api` en de Vite frontend uit `web/`. De Go-server serveert de frontend en gebruikt PostgreSQL als actieve databasebackend.
 
 ```sh
-cp .env.postgres.example .env
-docker compose up -d db
-STORE_BACKEND=postgres go run ./cmd/api
+docker compose -f compose.yml up --build -d
 ```
 
-De migratie `migrations/001_initial_schema.sql` wordt bij een lege Docker database automatisch uitgevoerd door de Postgres container.
+PostgreSQL-data staat onder `data/postgres`. MinIO blijft beschikbaar in Compose maar wordt nog niet door de applicatie gebruikt.
 
 ## Eerste domeinen
 
