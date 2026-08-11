@@ -1,0 +1,16 @@
+.git
+.env
+.env.*
+data/
+bin/
+dist/
+web/node_modules/
+web/dist/
+node_modules/
+*.db
+*.db-shm
+*.db-wal
+*.log
+coverage.out
+tmp/
+.DS_Store
