@@ -1,0 +1,5 @@
+date;description;counterparty;iban;amount;reference
+2026-01-02;Boodschappen supermarkt;Supermarkt Voorbeeld;NL00BANK0123456789;-54,32;demo-001
+2026-01-03;Salaris januari;Werkgever Voorbeeld;NL00BANK0987654321;3250,00;demo-002
+2026-01-05;Verduurzaming woning;Installateur Voorbeeld;NL00BANK0111222333;-749,95;demo-003
+2026-01-08;Vakantie reservering;Spaarrekening;NL00BANK0444555666;-250,00;demo-004
