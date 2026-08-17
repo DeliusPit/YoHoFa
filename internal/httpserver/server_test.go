@@ -51,3 +51,19 @@ func TestBasicAuthProtectsAPI(t *testing.T) {
 		t.Fatalf("request with credentials returned %d, want %d", authorized.Code, http.StatusOK)
 	}
 }
+
+func TestDomainEventsRequirePostgres(t *testing.T) {
+	handler := New(Dependencies{
+		Store:  store.OpenMemory(),
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/assets/1/events", nil))
+	if response.Code != http.StatusNotImplemented {
+		t.Fatalf("events returned %d, want %d", response.Code, http.StatusNotImplemented)
+	}
+	if response.Body.String() != "{\"error\":\"domain_events_require_postgres\"}\n" {
+		t.Fatalf("unexpected response: %s", response.Body.String())
+	}
+}

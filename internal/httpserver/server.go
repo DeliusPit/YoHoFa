@@ -16,13 +16,21 @@ import (
 
 	"geldzaken/internal/bankimport"
 	"geldzaken/internal/config"
+	"geldzaken/internal/objectstore"
 	"geldzaken/internal/store"
 )
 
 type Dependencies struct {
-	Config config.Config
-	Store  store.Backend
-	Logger *slog.Logger
+	Config      config.Config
+	Store       store.Backend
+	Documents   store.DocumentRepository
+	Assets      store.AssetRepository
+	Liabilities store.LiabilityRepository
+	Cases       store.CaseRepository
+	Relations   store.EntityRelationRepository
+	Events      store.DomainEventRepository
+	Objects     objectstore.Store
+	Logger      *slog.Logger
 }
 
 func New(deps Dependencies) http.Handler {
@@ -33,8 +41,68 @@ func New(deps Dependencies) http.Handler {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unhealthy"})
 			return
 		}
+		if deps.Objects != nil {
+			if err := deps.Objects.Ping(r.Context()); err != nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unhealthy"})
+				return
+			}
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+
+	documentsAvailable := deps.Documents != nil && deps.Objects != nil
+	if documentsAvailable {
+		registerDocumentRoutes(mux, deps)
+	} else {
+		registerUnavailableDocumentRoutes(mux)
+	}
+	if deps.Assets != nil && deps.Relations != nil {
+		registerAssetRoutes(mux, deps)
+		if documentsAvailable {
+			registerAssetDocumentRoutes(mux, deps)
+		} else {
+			registerUnavailableObjectDocumentRoutes(mux, "assets")
+		}
+	} else {
+		unavailable := func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "assets_require_postgres"})
+		}
+		mux.HandleFunc("/api/v1/assets", unavailable)
+		mux.HandleFunc("/api/v1/assets/", unavailable)
+	}
+	if deps.Liabilities != nil && deps.Relations != nil {
+		registerLiabilityRoutes(mux, deps)
+		if documentsAvailable {
+			registerLiabilityDocumentRoutes(mux, deps)
+		} else {
+			registerUnavailableObjectDocumentRoutes(mux, "liabilities")
+		}
+	} else {
+		unavailable := func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "liabilities_require_postgres"})
+		}
+		mux.HandleFunc("/api/v1/liabilities", unavailable)
+		mux.HandleFunc("/api/v1/liabilities/", unavailable)
+	}
+	if deps.Cases != nil && deps.Relations != nil {
+		registerCaseRoutes(mux, deps)
+		if documentsAvailable {
+			registerCaseDocumentRoutes(mux, deps)
+		} else {
+			registerUnavailableObjectDocumentRoutes(mux, "cases")
+		}
+	} else {
+		unavailable := func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "cases_require_postgres"})
+		}
+		mux.HandleFunc("/api/v1/cases", unavailable)
+		mux.HandleFunc("/api/v1/cases/", unavailable)
+	}
+	if deps.Events != nil {
+		registerDomainEventRoutes(mux, deps)
+	} else {
+		registerUnavailableDomainEventRoutes(mux)
+	}
 
 	if deps.Config.WebDir != "" {
 		mux.HandleFunc("GET /", staticHandler(deps.Config.WebDir))
@@ -418,6 +486,27 @@ func New(deps Dependencies) http.Handler {
 		handler = basicAuth(deps.Config.AuthUsername, deps.Config.AuthPassword, handler)
 	}
 	return cors(deps.Config.CORSOrigin, handler)
+}
+
+func registerUnavailableDocumentRoutes(mux *http.ServeMux) {
+	unavailable := func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "documents_require_postgres_and_minio"})
+	}
+	mux.HandleFunc("GET /api/v1/documents", unavailable)
+	mux.HandleFunc("POST /api/v1/documents", unavailable)
+	mux.HandleFunc("GET /api/v1/documents/{id}/content", unavailable)
+	mux.HandleFunc("GET /api/v1/transactions/{id}/documents", unavailable)
+	mux.HandleFunc("POST /api/v1/transactions/{id}/documents", unavailable)
+	mux.HandleFunc("DELETE /api/v1/transactions/{id}/documents/{documentId}", unavailable)
+}
+
+func registerUnavailableObjectDocumentRoutes(mux *http.ServeMux, objectPath string) {
+	unavailable := func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "documents_require_postgres_and_minio"})
+	}
+	mux.HandleFunc("GET /api/v1/"+objectPath+"/{id}/documents", unavailable)
+	mux.HandleFunc("POST /api/v1/"+objectPath+"/{id}/documents", unavailable)
+	mux.HandleFunc("DELETE /api/v1/"+objectPath+"/{id}/documents/{documentId}", unavailable)
 }
 
 func basicAuth(username string, password string, next http.Handler) http.Handler {

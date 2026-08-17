@@ -42,6 +42,12 @@ services:
     ports:
       - "9001:9001"
 
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
     networks:
       - geldzaken-backend
 
@@ -64,12 +70,14 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET:-geldzaken-documents}
+      MINIO_USE_SSL: "false"
 
     depends_on:
       postgres:
         condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
 
     networks:
       - geldzaken-backend

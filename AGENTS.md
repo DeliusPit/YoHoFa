@@ -4,12 +4,16 @@ Personal-finance app ("Geldzaken").
 
 The active application is the root Go module with `cmd/api` as the backend entrypoint and `web/` as the Vite frontend.
 
-The application currently runs with PostgreSQL. Docker Compose also starts MinIO, but the application does not use MinIO yet.
+The application runs with PostgreSQL for structured data and MinIO for original document objects.
 
 ## Current architecture
 
 - `cmd/api` is the real backend entrypoint.
 - `internal/` contains the application logic, HTTP server, configuration, imports and stores.
+- Cases, assets and liabilities are first-class domain objects with generic document and transaction relations.
+- `entity_relations` is the canonical polymorphic relation store; supported types and relation semantics must be explicitly validated in application code because PostgreSQL cannot enforce cross-table polymorphic foreign keys.
+- Canonical relation orientation is document `evidence_for` case/asset/transaction/liability, asset `financed_by` liability, case `relates_to` transaction/asset/liability, and asset/liability `relates_to` transaction.
+- Case statuses are exactly `planned`, `active`, `completed` and `archived`; case type is a free non-empty classification. Timelines use user-facing `domain_events`, not workflow or audit state.
 - `web/` is the real frontend.
 - `migrations/` contains PostgreSQL migrations.
 - `compose.yml` is the current Docker Compose runtime definition.
@@ -17,7 +21,7 @@ The application currently runs with PostgreSQL. Docker Compose also starts MinIO
 - `frontend/` is not used by the current application.
 - PostgreSQL is the current working database backend.
 - SQLite code may remain temporarily during verified migration cleanup, but it is not the active Compose backend.
-- MinIO is available but not yet used by application code.
+- MinIO stores original document objects; PostgreSQL stores their metadata and links.
 
 ## Run the stack
 
@@ -33,7 +37,7 @@ The application currently runs with PostgreSQL. Docker Compose also starts MinIO
 - Compose builds the real application from the repository-root `Dockerfile`, not `backend/Dockerfile`.
 - The API serves the built frontend from `WEB_DIR` on port `8080`.
 - PostgreSQL and MinIO are available on the `geldzaken-backend` Docker network.
-- The application uses PostgreSQL through `STORE_BACKEND=postgres`; MinIO is not used by the application yet.
+- The application uses PostgreSQL through `STORE_BACKEND=postgres` and MinIO through the `MINIO_*` configuration.
 - Persistent runtime data is stored outside the application container.
 
 ## Backend
@@ -68,7 +72,7 @@ The application currently runs with PostgreSQL. Docker Compose also starts MinIO
 - PostgreSQL must remain the system of record for document metadata, relationships and application state.
 - Do not encode business meaning in MinIO paths.
 - Store object identifiers and metadata in PostgreSQL.
-- Do not introduce MinIO application logic until a concrete document-storage requirement is being implemented.
+- Keep MinIO application logic limited to concrete document-storage requirements.
 
 ## Architecture direction
 
@@ -90,6 +94,7 @@ Core domains include:
 
 - assets;
 - liabilities;
+- cases/dossiers;
 - transactions;
 - documents;
 - bank imports and categorisation;

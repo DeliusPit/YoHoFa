@@ -38,7 +38,72 @@ func MigrateSQLiteToPostgres(ctx context.Context, sqlitePath string, databaseURL
 		return MigrationResult{}, err
 	}
 	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `
+		lock table transactions, categories, accounts, main_categories, households, assets, liabilities, cases,
+			document_links, object_relations, entity_relations, domain_events in access exclusive mode
+	`); err != nil {
+		return MigrationResult{}, err
+	}
 
+	var assetCount, liabilityCount, caseCount, transactionDocumentLinkCount, assetDocumentLinkCount, liabilityDocumentLinkCount, caseDocumentLinkCount int
+	var transactionRelationCount, assetRelationCount, liabilityRelationCount, caseRelationCount, entityRelationCount, domainEventCount int
+	if err := tx.QueryRow(ctx, `select count(*) from assets`).Scan(&assetCount); err != nil {
+		return MigrationResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `select count(*) from liabilities`).Scan(&liabilityCount); err != nil {
+		return MigrationResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `select count(*) from cases`).Scan(&caseCount); err != nil {
+		return MigrationResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `select count(*) from document_links where object_type = $1`, ObjectTypeTransaction).Scan(&transactionDocumentLinkCount); err != nil {
+		return MigrationResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `select count(*) from document_links where object_type = $1`, ObjectTypeAsset).Scan(&assetDocumentLinkCount); err != nil {
+		return MigrationResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `select count(*) from document_links where object_type = $1`, ObjectTypeLiability).Scan(&liabilityDocumentLinkCount); err != nil {
+		return MigrationResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `select count(*) from document_links where object_type = $1`, ObjectTypeCase).Scan(&caseDocumentLinkCount); err != nil {
+		return MigrationResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `
+		select count(*) from object_relations
+		where object_type = $1 or related_object_type = $1
+	`, ObjectTypeTransaction).Scan(&transactionRelationCount); err != nil {
+		return MigrationResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `
+		select count(*) from object_relations
+		where object_type = $1 or related_object_type = $1
+	`, ObjectTypeAsset).Scan(&assetRelationCount); err != nil {
+		return MigrationResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `
+		select count(*) from object_relations
+		where object_type = $1 or related_object_type = $1
+	`, ObjectTypeLiability).Scan(&liabilityRelationCount); err != nil {
+		return MigrationResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `
+		select count(*) from object_relations
+		where object_type = $1 or related_object_type = $1
+	`, ObjectTypeCase).Scan(&caseRelationCount); err != nil {
+		return MigrationResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `
+		select count(*) from entity_relations
+		where source_type in ($1, $2, $3, $4) or target_type in ($1, $2, $3, $4)
+	`, ObjectTypeAsset, ObjectTypeTransaction, ObjectTypeLiability, ObjectTypeCase).Scan(&entityRelationCount); err != nil {
+		return MigrationResult{}, err
+	}
+	if err := tx.QueryRow(ctx, `select count(*) from domain_events`).Scan(&domainEventCount); err != nil {
+		return MigrationResult{}, err
+	}
+	if assetCount > 0 || liabilityCount > 0 || caseCount > 0 || transactionDocumentLinkCount > 0 || assetDocumentLinkCount > 0 || liabilityDocumentLinkCount > 0 || caseDocumentLinkCount > 0 || transactionRelationCount > 0 || assetRelationCount > 0 || liabilityRelationCount > 0 || caseRelationCount > 0 || entityRelationCount > 0 || domainEventCount > 0 {
+		return MigrationResult{}, fmt.Errorf("migration refused: target contains assets, liabilities, cases, object links, or domain events")
+	}
 	if _, err := tx.Exec(ctx, `truncate transactions, categories, accounts, main_categories, households restart identity cascade`); err != nil {
 		return MigrationResult{}, err
 	}

@@ -73,7 +73,33 @@ De applicatiecontainer bouwt de Go API uit `cmd/api` en de Vite frontend uit `we
 docker compose -f compose.yml up --build -d
 ```
 
-PostgreSQL-data staat onder `data/postgres`. MinIO blijft beschikbaar in Compose maar wordt nog niet door de applicatie gebruikt.
+PostgreSQL-data staat onder `data/postgres`; documentobjecten staan onder `data/minio`.
+
+## Documenten
+
+Documentmetadata en koppelingen staan in PostgreSQL. De originele bestanden staan in de configureerbare MinIO-bucket. Compose gebruikt standaard `MINIO_BUCKET=geldzaken-documents`; voor lokaal starten buiten Compose zijn daarnaast `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` en optioneel `MINIO_USE_SSL` nodig.
+
+Documenten zijn zelfstandige objecten. Een koppeling met een transactie verwijderen verwijdert het document of het MinIO-object niet.
+
+## Bezittingen
+
+Bezittingen zijn zelfstandige domeinobjecten in PostgreSQL. Ze kunnen via generieke relaties aan transacties en via de bestaande documentlaag aan documenten worden gekoppeld. Waarden worden intern als centen opgeslagen; de valuta staat per bezitting vastgelegd. `assets.current_value` is uitsluitend een transactioneel bijgewerkte cache van de nieuwste regel in `asset_valuations` en wordt niet rechtstreeks via assetbeheer aangepast.
+
+## Schulden
+
+Schulden zijn zelfstandige PostgreSQL-objecten met type, schuldeiser, looptijd, oorspronkelijk bedrag en actuele balans. Ze kunnen aan transacties en bewijsdocumenten worden gekoppeld. Een asset kan met `financed_by` aan de liability worden gekoppeld die de asset financiert.
+
+## Dossiers
+
+Dossiers (`cases`) groeperen een vrij gekozen, niet-lege classificatie, titel, beschrijving en optionele looptijd. De exacte statussen zijn `planned`, `active`, `completed` en `archived`. Een dossier kan met `relates_to` aan transacties, assets en liabilities worden gekoppeld; bewijsdocumenten wijzen met `evidence_for` naar het dossier. De gebruikersgerichte tijdlijn komt uit `domain_events` en is geen workflow.
+
+## Domeinrelaties
+
+`entity_relations` legt polymorfe relaties vast tussen cases, assets, liabilities, transacties en documenten. `relates_to` loopt van een case naar een transactie, asset of liability, of van een asset/liability naar een transactie. `evidence_for` loopt van een document naar een case, asset, transactie of liability. `financed_by` loopt van een asset naar een liability. PostgreSQL kan voor een type/id-paar geen normale foreign key naar meerdere mogelijke tabellen afdwingen; daarom controleert de repository het bestaan van beide objecten en blokkeren delete-operaties relaties waar nodig.
+
+## Domeingebeurtenissen
+
+`domain_events` is een automatisch bijgewerkte tijdlijnprojectie voor assets, liabilities en cases. Het is geen event-sourcingmodel, broker of technische auditlog. Mutaties en hun tijdlijnregel worden in dezelfde PostgreSQL-transactie opgeslagen. De API biedt alleen `GET /api/v1/assets/{id}/events`, `GET /api/v1/liabilities/{id}/events` en `GET /api/v1/cases/{id}/events`; gebeurtenissen kunnen niet rechtstreeks via de API worden aangemaakt, gewijzigd of verwijderd.
 
 ## Eerste domeinen
 

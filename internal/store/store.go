@@ -71,6 +71,7 @@ type Transaction struct {
 	ExternalReference string `json:"externalReference,omitempty"`
 	ImportFingerprint string `json:"importFingerprint,omitempty"`
 	Hidden            bool   `json:"hidden"`
+	DocumentCount     int    `json:"documentCount"`
 }
 
 type TransactionFilter struct {

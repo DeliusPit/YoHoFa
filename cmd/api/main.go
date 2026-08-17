@@ -11,6 +11,7 @@ import (
 
 	"geldzaken/internal/config"
 	"geldzaken/internal/httpserver"
+	"geldzaken/internal/objectstore"
 	"geldzaken/internal/store"
 )
 
@@ -30,10 +31,23 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+	documents, _ := db.(store.DocumentRepository)
+	assets, _ := db.(store.AssetRepository)
+	liabilities, _ := db.(store.LiabilityRepository)
+	cases, _ := db.(store.CaseRepository)
+	relations, _ := db.(store.EntityRelationRepository)
+	events, _ := db.(store.DomainEventRepository)
+	var objects objectstore.Store
+	if documents != nil {
+		objects, err = objectstore.Open(ctx, cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey, cfg.MinIOBucket, cfg.MinIOUseSSL)
+		if err != nil {
+			logger.Error("open object store", "error", err)
+		}
+	}
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpserver.New(httpserver.Dependencies{Config: cfg, Store: db, Logger: logger}),
+		Handler:           httpserver.New(httpserver.Dependencies{Config: cfg, Store: db, Documents: documents, Assets: assets, Liabilities: liabilities, Cases: cases, Relations: relations, Events: events, Objects: objects, Logger: logger}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

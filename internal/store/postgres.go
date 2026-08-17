@@ -342,7 +342,8 @@ func (s *Postgres) Transactions(ctx context.Context, filter TransactionFilter) (
 	rows, err := s.pool.Query(ctx, `
 		select transactions.id, transactions.account_id, coalesce(transactions.category_id, 0), transactions.booked_on::text, transactions.description,
 			coalesce(transactions.counterparty, ''), coalesce(transactions.counterparty_iban, ''), transactions.amount_cents,
-			coalesce(transactions.external_reference, ''), coalesce(transactions.import_fingerprint, ''), transactions.hidden
+			coalesce(transactions.external_reference, ''), coalesce(transactions.import_fingerprint, ''), transactions.hidden,
+			(select count(distinct source_id) from entity_relations where source_type = 'document' and target_type = 'transaction' and target_id = transactions.id and relation_type = 'evidence_for')
 		from transactions
 		left join categories on categories.id = transactions.category_id
 		where ($1::bigint = 0 or account_id = $2)
@@ -370,7 +371,7 @@ func (s *Postgres) Transactions(ctx context.Context, filter TransactionFilter) (
 	items := []Transaction{}
 	for rows.Next() {
 		var item Transaction
-		if err := rows.Scan(&item.ID, &item.AccountID, &item.CategoryID, &item.BookedOn, &item.Description, &item.Counterparty, &item.CounterpartyIBAN, &item.AmountCents, &item.ExternalReference, &item.ImportFingerprint, &item.Hidden); err != nil {
+		if err := rows.Scan(&item.ID, &item.AccountID, &item.CategoryID, &item.BookedOn, &item.Description, &item.Counterparty, &item.CounterpartyIBAN, &item.AmountCents, &item.ExternalReference, &item.ImportFingerprint, &item.Hidden, &item.DocumentCount); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -578,8 +579,18 @@ func (s *Postgres) account(ctx context.Context, id int64) (Account, error) {
 }
 
 func (s *Postgres) ensureSchema(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, postgresSchema)
-	return err
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `select pg_advisory_xact_lock(684523817)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, postgresSchema); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Postgres) seedDefaults(ctx context.Context) error {
@@ -707,4 +718,241 @@ alter table transactions add column if not exists hidden boolean not null defaul
 create index if not exists transactions_account_booked_on_idx on transactions(account_id, booked_on desc);
 create index if not exists transactions_category_idx on transactions(category_id);
 create unique index if not exists transactions_import_fingerprint_unique on transactions(import_fingerprint) where import_fingerprint is not null and import_fingerprint != '';
+
+create table if not exists documents (
+    id bigserial primary key,
+    original_filename text not null,
+    mime_type text not null,
+    size_bytes bigint not null check (size_bytes >= 0),
+    sha256 char(64) not null,
+    object_key text not null unique,
+    document_date date,
+    description text,
+    created_at timestamptz not null default now()
+);
+
+create index if not exists documents_sha256_idx on documents(sha256);
+
+create table if not exists document_links (
+    document_id bigint not null references documents(id) on delete cascade,
+    object_type text not null,
+    object_id bigint not null,
+    created_at timestamptz not null default now(),
+    primary key (document_id, object_type, object_id)
+);
+
+create index if not exists document_links_object_idx on document_links(object_type, object_id);
+
+create table if not exists assets (
+    id bigserial primary key,
+    household_id bigint not null default 1 references households(id) on delete cascade,
+    asset_type text not null check (asset_type in ('real_estate', 'bank_account', 'investment_account', 'vehicle', 'equipment', 'valuable', 'cash', 'other')),
+    name text not null,
+    description text,
+    status text not null default 'active' check (status in ('planned', 'active', 'disposed')),
+    acquired_at date,
+    disposed_at date,
+    purchase_value bigint not null default 0 check (purchase_value >= 0),
+    current_value bigint not null default 0 check (current_value >= 0),
+    currency char(3) not null default 'EUR',
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+create index if not exists assets_household_type_status_idx on assets(household_id, asset_type, status, name);
+
+create table if not exists liabilities (
+    id bigserial primary key,
+    household_id bigint not null default 1 references households(id) on delete cascade,
+    liability_type text not null check (liability_type in ('mortgage', 'loan', 'tax_debt', 'credit', 'other')),
+    name text not null,
+    description text,
+    creditor text,
+    start_date date,
+    end_date date,
+    original_amount bigint not null default 0 check (original_amount >= 0),
+    current_balance bigint not null default 0 check (current_balance >= 0),
+    currency char(3) not null default 'EUR',
+    status text not null default 'active' check (status in ('planned', 'active', 'repaid', 'cancelled')),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    check (end_date is null or start_date is null or end_date >= start_date)
+);
+
+create index if not exists liabilities_household_type_status_idx on liabilities(household_id, liability_type, status, name);
+
+create table if not exists cases (
+    id bigserial primary key,
+    household_id bigint not null references households(id) on delete cascade,
+    case_type text not null check (btrim(case_type) <> ''),
+    title text not null check (btrim(title) <> ''),
+    description text,
+    start_date date,
+    end_date date,
+    status text not null default 'active' check (status in ('planned', 'active', 'completed', 'archived')),
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    check (end_date is null or start_date is null or end_date >= start_date)
+);
+
+create index if not exists cases_household_type_status_title_idx on cases(household_id, case_type, status, title);
+
+create table if not exists domain_events (
+    id bigserial primary key,
+    entity_type text not null check (entity_type in ('asset', 'liability', 'case')),
+    entity_id bigint not null check (entity_id > 0),
+    event_type text not null check (btrim(event_type) <> ''),
+    event_date date not null,
+    description text not null check (btrim(description) <> ''),
+    related_entity_type text,
+    related_entity_id bigint,
+    created_at timestamptz not null default now(),
+    check ((related_entity_type is null) = (related_entity_id is null)),
+    check (related_entity_type is null or related_entity_type in ('document', 'transaction', 'asset', 'liability', 'case')),
+    check (related_entity_id is null or related_entity_id > 0),
+    check (related_entity_type is null or entity_type <> related_entity_type or entity_id <> related_entity_id)
+);
+
+create index if not exists domain_events_timeline_idx on domain_events(entity_type, entity_id, event_date desc, id desc);
+create unique index if not exists domain_events_creation_unique_idx on domain_events(entity_type, entity_id)
+where event_type in ('asset_created', 'liability_created', 'case_created');
+
+insert into domain_events (entity_type, entity_id, event_type, event_date, description, created_at)
+select 'asset', id, 'asset_created', (created_at at time zone 'UTC')::date, 'Bezitting aangemaakt', created_at from assets
+on conflict do nothing;
+insert into domain_events (entity_type, entity_id, event_type, event_date, description, created_at)
+select 'liability', id, 'liability_created', (created_at at time zone 'UTC')::date, 'Schuld aangemaakt', created_at from liabilities
+on conflict do nothing;
+insert into domain_events (entity_type, entity_id, event_type, event_date, description, created_at)
+select 'case', id, 'case_created', (created_at at time zone 'UTC')::date, 'Dossier aangemaakt', created_at from cases
+on conflict do nothing;
+
+create table if not exists object_relations (
+    object_type text not null,
+    object_id bigint not null,
+    related_object_type text not null,
+    related_object_id bigint not null,
+    relation_type text not null default 'related',
+    created_at timestamptz not null default now(),
+    primary key (object_type, object_id, related_object_type, related_object_id, relation_type),
+    check (object_type <> related_object_type or object_id <> related_object_id)
+);
+
+create index if not exists object_relations_related_idx on object_relations(related_object_type, related_object_id, relation_type);
+
+create table if not exists asset_valuations (
+    id bigserial primary key,
+    asset_id bigint not null references assets(id) on delete cascade,
+    valuation_date date not null,
+    value bigint not null check (value >= 0),
+    valuation_type text not null check (valuation_type in ('purchase', 'estimate', 'appraisal', 'tax', 'market', 'other')),
+    source text,
+    notes text,
+    created_at timestamptz not null default now()
+);
+
+create index if not exists asset_valuations_asset_date_idx on asset_valuations(asset_id, valuation_date desc, id desc);
+
+insert into asset_valuations (asset_id, valuation_date, value, valuation_type, source)
+select assets.id, coalesce(assets.acquired_at, current_date), assets.current_value, 'estimate', 'Migratie huidige waarde'
+from assets
+where assets.current_value > 0
+and not exists (select 1 from asset_valuations where asset_valuations.asset_id = assets.id);
+
+update assets
+set current_value = coalesce((
+    select asset_valuations.value
+    from asset_valuations
+    where asset_valuations.asset_id = assets.id
+    order by asset_valuations.valuation_date desc, asset_valuations.id desc
+    limit 1
+), 0);
+
+create table if not exists schema_migrations (
+    version text primary key,
+    applied_at timestamptz not null default now()
+);
+
+create table if not exists entity_relations (
+    id bigserial primary key,
+    source_type text not null,
+    source_id bigint not null,
+    target_type text not null,
+    target_id bigint not null,
+    relation_type text not null,
+    valid_from date,
+    valid_to date,
+    notes text,
+    created_at timestamptz not null default now(),
+    check (source_type <> target_type or source_id <> target_id),
+    check (valid_to is null or valid_from is null or valid_to >= valid_from)
+);
+
+alter table entity_relations drop constraint if exists entity_relations_relation_type_check;
+alter table entity_relations add constraint entity_relations_relation_type_check
+    check (relation_type in ('relates_to', 'evidence_for', 'financed_by'));
+
+create unique index if not exists entity_relations_unique_idx on entity_relations(
+    source_type, source_id, target_type, target_id, relation_type,
+    coalesce(valid_from, '-infinity'::date), coalesce(valid_to, 'infinity'::date)
+);
+create index if not exists entity_relations_source_idx on entity_relations(source_type, source_id, relation_type);
+create index if not exists entity_relations_target_idx on entity_relations(target_type, target_id, relation_type);
+
+insert into entity_relations (source_type, source_id, target_type, target_id, relation_type, created_at)
+select 'asset', legacy.asset_id, 'transaction', legacy.transaction_id, 'relates_to', min(legacy.created_at)
+from (
+    select object_id as asset_id, related_object_id as transaction_id, created_at
+    from object_relations
+    where object_type = 'asset' and related_object_type = 'transaction'
+    union all
+    select related_object_id, object_id, created_at
+    from object_relations
+    where object_type = 'transaction' and related_object_type = 'asset'
+) legacy
+join assets on assets.id = legacy.asset_id
+join transactions on transactions.id = legacy.transaction_id
+where not exists (select 1 from schema_migrations where version = '005_entity_relations')
+and not exists (
+    select 1 from entity_relations
+    where source_type = 'asset'
+      and source_id = legacy.asset_id
+      and target_type = 'transaction'
+      and target_id = legacy.transaction_id
+      and relation_type = 'relates_to'
+      and valid_from is null and valid_to is null
+)
+group by legacy.asset_id, legacy.transaction_id;
+
+insert into entity_relations (source_type, source_id, target_type, target_id, relation_type, created_at)
+select 'document', legacy.document_id, legacy.target_type, legacy.target_id, 'evidence_for', min(legacy.created_at)
+from (
+    select document_links.document_id, 'asset'::text as target_type, document_links.object_id as target_id, document_links.created_at
+    from document_links
+    join documents on documents.id = document_links.document_id
+    join assets on assets.id = document_links.object_id
+    where document_links.object_type = 'asset'
+    union all
+    select document_links.document_id, 'transaction', document_links.object_id, document_links.created_at
+    from document_links
+    join documents on documents.id = document_links.document_id
+    join transactions on transactions.id = document_links.object_id
+    where document_links.object_type = 'transaction'
+) legacy
+where not exists (select 1 from schema_migrations where version = '005_entity_relations')
+and not exists (
+    select 1 from entity_relations
+    where source_type = 'document'
+      and source_id = legacy.document_id
+      and target_type = legacy.target_type
+      and target_id = legacy.target_id
+      and relation_type = 'evidence_for'
+      and valid_from is null and valid_to is null
+)
+group by legacy.document_id, legacy.target_type, legacy.target_id;
+
+insert into schema_migrations (version) values ('005_entity_relations') on conflict (version) do nothing;
+insert into schema_migrations (version) values ('006_liabilities') on conflict (version) do nothing;
+insert into schema_migrations (version) values ('007_cases') on conflict (version) do nothing;
+insert into schema_migrations (version) values ('008_domain_events') on conflict (version) do nothing;
 `
