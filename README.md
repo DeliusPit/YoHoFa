@@ -4,14 +4,14 @@ Applicatie-opbouw voor persoonlijke geldzaken van een huishouden.
 
 ## Doel
 
-Een zo veel mogelijk in Go geschreven applicatie met een kleine JavaScript frontend, SQLite als standaard database en deployment naar een LXC-container op een Proxmox-cluster.
+Een zo veel mogelijk in Go geschreven applicatie met een kleine JavaScript frontend, configureerbare opslag en deployment naar een LXC-container op een Proxmox-cluster.
 
 ## Stack
 
 - Backend: Go HTTP API
 - Frontend: Vite + vanilla JavaScript
-- Data tijdens lokale ontwikkeling en productie: PostgreSQL
-- Vorige opslaglaag: SQLite, alleen nog aanwezig voor migratie/fallback zolang cleanup niet is afgerond
+- Data tijdens lokale ontwikkeling en productie: configureerbaar per opslagprofiel
+- Geconfigureerde databasekeuzes: PostgreSQL, SQLite en MySQL
 - PostgreSQL schema: SQL-bestanden in `migrations/` en schema-check bij starten
 - Lokaal draaien: Go API + Vite frontend
 - Deployment: build artifact + systemd service in LXC
@@ -19,9 +19,9 @@ Een zo veel mogelijk in Go geschreven applicatie met een kleine JavaScript front
 ## Structuur
 
 - `cmd/api`: startpunt van de backend
-- `internal/config`: configuratie via environment variables
+- `internal/config`: configuratie via environment variables of een beveiligd configuratiebestand
 - `internal/httpserver`: HTTP routes en handlers
-- `internal/store`: data-opslag via SQLite, memory-store of Postgres
+- `internal/store`: data-opslag via SQLite, PostgreSQL, MySQL of memory-store
 - `migrations`: database schema migraties
 - `web`: frontend
 - `deploy`: systemd en Proxmox/LXC deployment-opbouw
@@ -73,21 +73,74 @@ De applicatiecontainer bouwt de Go API uit `cmd/api` en de Vite frontend uit `we
 docker compose -f compose.yml up --build -d
 ```
 
-PostgreSQL-data staat onder `data/postgres`; documentobjecten staan onder `data/minio`.
+PostgreSQL-data staat onder `data/postgres`; de lokale MinIO-service gebruikt `data/minio`; SQLite-bestanden staan onder `data/sqlite` en objecten van de filesystem-backend onder `data/objects`. MinIO is hier alleen een lokale S3-compatible provider. Voor productie kan dezelfde S3-laag ook naar Garage of een andere S3-compatible dienst wijzen. SQLite-paden moeten absoluut zijn, mogen geen URI of `/` zijn en blijven in Compose beperkt tot `/app/data/sqlite` via `DATABASE_DATA_ROOT`.
+
+Let op: `docker-compose.yml` is een oude PostgreSQL-only helper. Gebruik voor de actuele applicatiestack `compose.yml`.
+
+De optionele MySQL 8.4-service start niet standaard. Vul de vier `MYSQL_*`-waarden uit `.env.example` in en start hem alleen met:
+
+```sh
+docker compose -f compose.yml --profile mysql up -d mysql
+```
+
+De persistente MySQL-data staat onder `data/mysql`. Poort 3306 is uitsluitend op `127.0.0.1` van de host gepubliceerd. De lokale Compose-service configureert geen TLS; kies voor deze service expliciet MySQL TLS-modus `disabled`, uitsluitend omdat applicatie en database over het afgeschermde Compose-netwerk communiceren.
 
 ## Documenten
 
-Documentmetadata en koppelingen staan in PostgreSQL. De originele bestanden staan in de configureerbare MinIO-bucket. Compose gebruikt standaard `MINIO_BUCKET=geldzaken-documents`; voor lokaal starten buiten Compose zijn daarnaast `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` en optioneel `MINIO_USE_SSL` nodig.
+Documentmetadata en koppelingen staan in de geconfigureerde relationele database. De originele bestanden kunnen in S3-compatibele objectopslag of op het lokale bestandssysteem staan. Compose koppelt het bestandssysteem standaard aan `/app/data/objects`; dit pad moet absoluut zijn en mag niet `/` zijn. Voor S3 gebruikt de applicatie `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_USE_TLS`, `S3_REGION`, `S3_PATH_STYLE` en `S3_CREATE_BUCKET`. MinIO blijft als lokale Compose-service beschikbaar om de S3-laag lokaal te testen.
 
-Documenten zijn zelfstandige objecten. Een koppeling met een transactie verwijderen verwijdert het document of het MinIO-object niet.
+Voor Garage bevat `S3_ENDPOINT` alleen `host:poort`, zonder `http://` of pad. Stel `S3_REGION` in op de regio van de Garage-key, gebruik normaal `S3_PATH_STYLE=true` en zet `S3_CREATE_BUCKET=false` wanneer de bucket vooraf in Garage is aangemaakt.
+
+### Opslagconfiguratie
+
+`config/storage.json` op de host, gekoppeld als `/app/config/storage.json`, is de gezaghebbende opslagconfiguratie. Het bestand bevat database- en objectopslagcredentials en is daarom geheim: maak geen commit of backup zonder passende versleuteling en toegangsbeperking. Als het bestand bestaat, wint het volledig van alle legacy opslagvariabelen; velden worden nooit afzonderlijk met environment variables samengevoegd. De root `.env` bevat alleen Compose-credentials voor de lokale PostgreSQL-, optionele MySQL- en MinIO-services. Productie-authenticatie en optionele providerneutrale bootstrapwaarden staan lokaal in `config/.env`, gebaseerd op `config/.env.example`, met bestandsmodus `0600`. Zonder zowel `AUTH_USERNAME` als `AUTH_PASSWORD` start de productiebackend niet.
+
+Voor een eenmalige omzetting van de huidige Compose-variabelen naar het bestand gebruikt u exact:
+
+```sh
+CONFIG_BOOTSTRAP_FROM_ENV=true docker compose -f compose.yml up -d
+```
+
+Daarna gebruikt elke normale herstart alleen het bestand:
+
+```sh
+docker compose -f compose.yml up -d
+```
+
+Zonder bestand blijft de bestaande environment-configuratie alleen-lezen werken wanneer opslagvariabelen aanwezig zijn. In productie zijn zowel `AUTH_USERNAME` als `AUTH_PASSWORD` verplicht; bij een ontbrekende waarde start de backend niet. Met volledige authenticatie staat `CONFIG_EDITABLE=true` wijzigingen via `Configuratie > Systeemconfiguratie` toe. Alleen niet-productieontwikkeling op een loopback-adres mag zonder authenticatie wijzigen; andere niet-productieomgevingen worden zonder volledige authenticatie alleen-lezen. Secrets worden uitsluitend als ingesteld/niet ingesteld getoond. Wijzigingen worden atomisch met bestandsmodus `0600` opgeslagen en gelden na een herstart.
+
+Een succesvolle wijziging schrijft opslagconfiguratieversie 2. Daarin blijven de afzonderlijke SQLite-, PostgreSQL- en MySQL-instellingen bewaard wanneer een andere backend wordt gekozen; hetzelfde geldt voor filesystem- en S3-instellingen. Een bestaand ongenummerd bestand met `database.backend` en `database.url` blijft exact compatibel en wordt pas bij een succesvolle wijziging naar versie 2 geschreven. De veilige GET-API retourneert alleen of wachtwoorden/sleutels zijn ingesteld, nooit de geheimen zelf.
+
+De profielen `local`, `server` en `central` zijn ondersteund. `local` combineert SQLite met filesystem-opslag; `server` en `central` combineren PostgreSQL of MySQL met filesystem- of S3-opslag. Alle drie databases implementeren documentenmetadata, assets, liabilities, dossiers, relaties, waarderingen en tijdlijnen. MySQL TLS is beperkt tot `required` (standaard, zonder plaintext fallback) en expliciet `disabled` voor een vertrouwd lokaal netwerk zoals Compose. Eerdere `preferred`-instellingen worden veilig als `required` behandeld. CA-instellingen zijn nog niet geïmplementeerd. Een andere selectie wijzigt alleen de actieve backend en migreert geen bestaande databasegegevens of objecten.
+
+### Systeembackup
+
+`Configuratie > Systeembackup` maakt handmatig een versleutelde restic-snapshot van de actieve database, documenten en configuratie. Rclone verzorgt de verbinding met de gekozen opslagprovider. Vul als doel een bestaande rclone-remote en pad in, bijvoorbeeld `backup:geldzaken`, samen met de bijbehorende rclone-configuratie en een afzonderlijk restic-wachtwoord. Opslaan valideert de opslag en initialiseert uitsluitend een lege doelmap; de knop `Nu backup maken` wordt pas daarna actief.
+
+De backupinstellingen staan met bestandsmodus `0600` in `config/backup.json`. Dit bestand bevat de rclone-configuratie en het restic-wachtwoord en mag niet ongecodeerd buiten het systeem worden bewaard. Bewaar het restic-wachtwoord daarnaast in een afzonderlijke herstelkluis: zonder dat wachtwoord kunnen snapshots niet worden hersteld. Gebruik voor S3 altijd een andere bucket dan de live documentenbucket; de applicatie blokkeert een rechtstreeks geconfigureerde overlap.
+
+Onder `Configuratie > Systeembackup > Backup herstellen` kan een bestaande snapshot worden gekozen. De applicatie maakt eerst een extra veiligheidsbackup, herstart in herstelmodus en vervangt daarna database, documenten en `storage.json`. Tijdens de herstart is de applicatie tijdelijk niet bereikbaar. De gekozen snapshot moet hetzelfde database- en objectopslagtype gebruiken als de actieve configuratie.
+
+Als de webinterface niet start, is hetzelfde herstel als onderhoudscommando beschikbaar:
+
+```sh
+docker compose stop backend
+docker compose run --rm --no-deps --entrypoint /app/geldzaken-recover backend --list
+docker compose run --rm --no-deps --entrypoint /app/geldzaken-recover backend --snapshot SNAPSHOT_ID
+docker compose up -d backend
+```
+
+Voer het herstelcommando alleen uit terwijl de backend is gestopt. Ook het noodcommando maakt standaard eerst een veiligheidsbackup; `--no-safety-backup` is uitsluitend bedoeld voor situaties waarin de actieve opslag niet meer leesbaar is.
+
+Documenten zijn zelfstandige objecten. Een koppeling met een transactie verwijderen verwijdert het document of het onderliggende object in filesystem/S3 niet.
 
 ## Bezittingen
 
-Bezittingen zijn zelfstandige domeinobjecten in PostgreSQL. Ze kunnen via generieke relaties aan transacties en via de bestaande documentlaag aan documenten worden gekoppeld. Waarden worden intern als centen opgeslagen; de valuta staat per bezitting vastgelegd. `assets.current_value` is uitsluitend een transactioneel bijgewerkte cache van de nieuwste regel in `asset_valuations` en wordt niet rechtstreeks via assetbeheer aangepast.
+Bezittingen zijn zelfstandige domeinobjecten in de relationele store. Ze kunnen via generieke relaties aan transacties en via de bestaande documentlaag aan documenten worden gekoppeld. Waarden worden intern als centen opgeslagen; de valuta staat per bezitting vastgelegd. `assets.current_value` is uitsluitend een transactioneel bijgewerkte cache van de nieuwste regel in `asset_valuations` en wordt niet rechtstreeks via assetbeheer aangepast.
 
 ## Schulden
 
-Schulden zijn zelfstandige PostgreSQL-objecten met type, schuldeiser, looptijd, oorspronkelijk bedrag en actuele balans. Ze kunnen aan transacties en bewijsdocumenten worden gekoppeld. Een asset kan met `financed_by` aan de liability worden gekoppeld die de asset financiert.
+Schulden zijn zelfstandige domeinobjecten met type, schuldeiser, looptijd, oorspronkelijk bedrag en actuele balans. Ze kunnen aan transacties en bewijsdocumenten worden gekoppeld. Een asset kan met `financed_by` aan de liability worden gekoppeld die de asset financiert.
 
 ## Dossiers
 

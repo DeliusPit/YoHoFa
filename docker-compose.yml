@@ -1,3 +1,6 @@
+## Legacy helper: PostgreSQL only.
+## Use `compose.yml` for the current full Geldzaken stack.
+
 services:
   db:
     image: postgres:16-alpine

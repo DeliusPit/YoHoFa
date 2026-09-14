@@ -4,7 +4,7 @@ Personal-finance app ("Geldzaken").
 
 The active application is the root Go module with `cmd/api` as the backend entrypoint and `web/` as the Vite frontend.
 
-The application runs with PostgreSQL for structured data and MinIO for original document objects.
+The application supports configurable storage profiles. The current Compose baseline uses PostgreSQL for structured data and S3-compatible object storage for original document objects. MinIO is only the local Compose S3-compatible provider; Garage and other S3-compatible providers are supported through the generic `S3_*` configuration.
 
 ## Current architecture
 
@@ -17,11 +17,11 @@ The application runs with PostgreSQL for structured data and MinIO for original 
 - `web/` is the real frontend.
 - `migrations/` contains PostgreSQL migrations.
 - `compose.yml` is the current Docker Compose runtime definition.
+- `docker-compose.yml` is a legacy PostgreSQL-only helper and is not the current full runtime definition.
 - `backend/` is an older temporary stub and is not the current application backend.
 - `frontend/` is not used by the current application.
-- PostgreSQL is the current working database backend.
-- SQLite code may remain temporarily during verified migration cleanup, but it is not the active Compose backend.
-- MinIO stores original document objects; PostgreSQL stores their metadata and links.
+- PostgreSQL is the default Compose database backend; SQLite and MySQL are supported store implementations and must remain behaviorally consistent where enabled.
+- S3-compatible object storage or the filesystem stores original document objects; the relational database stores their metadata and links.
 
 ## Run the stack
 
@@ -36,8 +36,8 @@ The application runs with PostgreSQL for structured data and MinIO for original 
 
 - Compose builds the real application from the repository-root `Dockerfile`, not `backend/Dockerfile`.
 - The API serves the built frontend from `WEB_DIR` on port `8080`.
-- PostgreSQL and MinIO are available on the `geldzaken-backend` Docker network.
-- The application uses PostgreSQL through `STORE_BACKEND=postgres` and MinIO through the `MINIO_*` configuration.
+- PostgreSQL and the local S3-compatible MinIO service are available on the `geldzaken-backend` Docker network.
+- The application uses PostgreSQL through `STORE_BACKEND=postgres` by default and object storage through provider-neutral `S3_*` configuration. Legacy `MINIO_*` variables may remain as Compose convenience values.
 - Persistent runtime data is stored outside the application container.
 
 ## Backend
@@ -59,20 +59,21 @@ The application runs with PostgreSQL for structured data and MinIO for original 
 
 ## Database
 
-- PostgreSQL is the current working baseline.
-- SQLite support was the previous baseline and should only be removed after PostgreSQL runtime verification remains successful.
-- PostgreSQL is the relational database.
+- PostgreSQL is the default Compose baseline.
+- SQLite is the local/standalone profile database and must not be removed.
+- MySQL is an optional server/central database backend and should stay behaviorally aligned with PostgreSQL and SQLite where supported.
+- PostgreSQL, SQLite and MySQL are relational database backends.
 - PostgreSQL schema changes belong in `migrations/`.
 - Keep application store behavior consistent across database implementations while both backends exist.
 - Do not silently change database semantics, constraints or seed behavior.
 
 ## Documents and object storage
 
-- MinIO is the target object store for documents and other binary objects.
-- PostgreSQL must remain the system of record for document metadata, relationships and application state.
-- Do not encode business meaning in MinIO paths.
+- S3-compatible storage, including Garage, is the target for central document object storage; filesystem storage is supported for local deployments.
+- The relational database must remain the system of record for document metadata, relationships and application state.
+- Do not encode business meaning in object keys or filesystem paths.
 - Store object identifiers and metadata in PostgreSQL.
-- Keep MinIO application logic limited to concrete document-storage requirements.
+- Keep object-storage application logic limited to concrete document-storage requirements.
 
 ## Architecture direction
 
@@ -81,10 +82,10 @@ The application runs with PostgreSQL for structured data and MinIO for original 
 - Separate deployment changes from functional/data-model migrations where practical.
 - Prefer a modular monolith over microservices.
 - Do not introduce additional infrastructure components unless they solve a concrete requirement.
-- Prefer PostgreSQL capabilities before introducing additional databases, search engines or queues.
+- Prefer existing relational database capabilities before introducing additional databases, search engines or queues.
 - Use application events conceptually where useful, but do not introduce a message broker without a concrete need.
-- Keep PostgreSQL as the authoritative structured-data store.
-- Keep MinIO as binary object storage, not as a metadata store.
+- Keep the configured relational database as the authoritative structured-data store.
+- Keep S3-compatible or filesystem object storage as binary object storage, not as a metadata store.
 
 ## Domain direction
 
@@ -120,7 +121,7 @@ A transaction may relate to multiple relevant objects or administrative contexts
 - Build application images from the repository root.
 - Runtime containers should not contain build toolchains unless required.
 - Keep persistent data outside disposable application containers.
-- Do not expose PostgreSQL or MinIO externally unless explicitly required.
+- Do not expose PostgreSQL, MySQL or S3-compatible object storage externally unless explicitly required.
 - Prefer Docker internal networking between application services.
 - Do not install application runtimes or databases directly on the Debian Docker host when they belong in containers.
 
@@ -180,7 +181,7 @@ For SQLite-to-PostgreSQL migration work:
 
 For document-storage migration work:
 
-- do not move documents to MinIO without retaining metadata and referential information;
+- do not move documents between filesystem and S3-compatible storage without retaining metadata and referential information;
 - avoid duplicate object storage when a relationship can be represented in PostgreSQL;
 - preserve checksums and immutable original files where applicable;
 - separate original documents from generated derivatives such as previews, OCR text or thumbnails.
