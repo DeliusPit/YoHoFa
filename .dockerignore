@@ -2,6 +2,7 @@
 .env
 .env.*
 data/
+config/
 bin/
 dist/
 web/node_modules/

@@ -14,13 +14,22 @@ RUN go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/geldzaken-api ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/geldzaken-recover ./cmd/recover
 
-FROM alpine:3.22
+FROM rclone/rclone:1.75.0 AS rclone
 
-RUN apk add --no-cache ca-certificates
+FROM postgres:18
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates mariadb-client restic \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 COPY --from=api-build /out/geldzaken-api /app/geldzaken-api
+COPY --from=api-build /out/geldzaken-recover /app/geldzaken-recover
 COPY --from=web-build /src/web/dist /app/web/dist
+
+RUN pg_dump --version && mariadb-dump --version && rclone version && restic version
 
 EXPOSE 8080
 ENTRYPOINT ["/app/geldzaken-api"]

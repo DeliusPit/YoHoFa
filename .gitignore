@@ -9,3 +9,6 @@ web/dist/
 *.db-shm
 *.db-wal
 data/
+config/*
+!config/.gitkeep
+!config/.env.example

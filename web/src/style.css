@@ -85,6 +85,7 @@ h1 {
 .dashboard-panel,
 .category-panel,
 .transaction-panel {
+  min-width: 0;
   padding: 22px;
   border: 1px solid #ddd3c2;
   border-radius: 28px;
@@ -121,6 +122,15 @@ h1 {
 .category-panel summary strong,
 .transaction-panel summary strong {
   font-size: 1.7rem;
+}
+
+#dashboard-net-worth {
+  min-width: 0;
+  color: #5f5a50;
+  font-size: 0.9rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .transaction-panel[open] summary strong::before {
@@ -418,35 +428,131 @@ h1 {
   font-size: 0.9rem;
 }
 
-.dashboard-account-list li {
-  display: block;
-  padding: 3px 0;
+.dashboard-wealth-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: 12px;
+  border-top: 1px solid #ddd3c2;
 }
 
-.dashboard-account-button {
-  display: grid;
-  grid-template-columns: 1fr auto;
+.dashboard-wealth-summary > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #5f5a50;
+}
+
+.dashboard-wealth-card {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  padding: 10px;
-  border: 1px solid transparent;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 0;
+  border: 0;
+  border-bottom: 1px solid #eadfce;
+  border-radius: 0;
   background: transparent;
   color: #5f5a50;
+  font-size: 0.9rem;
   text-align: left;
 }
 
-.dashboard-account-button:hover,
-.dashboard-account-button.active {
-  border-color: #ddd3c2;
+.dashboard-wealth-summary button.dashboard-wealth-card:hover {
   background: #f6f2ea;
 }
 
-.dashboard-account-button small {
+.dashboard-wealth-card > span:first-child {
+  color: #14213d;
+  font-weight: 800;
+}
+
+.dashboard-wealth-card small {
+  margin-left: 4px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.dashboard-wealth-values {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
   text-align: right;
+}
+
+.dashboard-wealth-values strong {
+  color: #14213d;
+  font-size: 0.9rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-wealth-net {
+  border-bottom: 0;
+  font-weight: 800;
+}
+
+.dashboard-wealth-net > span:first-child,
+.dashboard-wealth-net .dashboard-wealth-values strong,
+.dashboard-wealth-net small {
+  color: #14213d;
+}
+
+.dashboard-wealth-error {
+  color: #9f2d20;
 }
 
 .dashboard-category-transactions {
   margin-top: 16px;
+}
+
+.manual-flow-panel {
+  margin-top: 16px;
+}
+
+.manual-flow-explanation {
+  margin: 14px 0 0;
+  color: #5f5a50;
+  line-height: 1.5;
+}
+
+.manual-transaction-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.manual-transaction-form button {
+  align-self: end;
+}
+
+.wealth-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.wealth-tab {
+  width: auto;
+  background: #f6f2ea;
+  color: #5f5a50;
+}
+
+.wealth-tab.active {
+  background: #14213d;
+  color: #fffaf0;
+}
+
+.wealth-section {
+  display: none;
+}
+
+.wealth-section.active {
+  display: block;
 }
 
 .category-panel p {
@@ -568,6 +674,323 @@ h1 {
 
 .config-section.active {
   display: grid;
+}
+
+.config-section.system-config-section.active {
+  display: block;
+}
+
+.config-section.backup-config-section.active {
+  display: block;
+}
+
+.system-configuration {
+  min-width: 0;
+}
+
+.system-config-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.system-config-heading h2 {
+  margin-top: 3px;
+}
+
+.config-source-badge,
+.secret-status {
+  display: inline-flex;
+  width: fit-content;
+  padding: 5px 9px;
+  border: 1px solid #ddd3c2;
+  border-radius: 999px;
+  background: #f6f2ea;
+  color: #5f5a50;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.system-config-explanation {
+  margin: 14px 0 0;
+  color: #5f5a50;
+  line-height: 1.5;
+}
+
+.system-config-status {
+  min-height: 1.4em;
+  margin: 10px 0;
+  color: #5f5a50;
+}
+
+.system-config-status.error {
+  padding: 14px;
+  border: 1px solid #ddd3c2;
+  border-radius: 14px;
+  background: #f6f2ea;
+  color: #9f2d20;
+}
+
+.system-config-status.error p {
+  margin-top: 0;
+}
+
+.system-config-status button {
+  width: auto;
+}
+
+.system-configuration-form {
+  gap: 18px;
+}
+
+.system-configuration-form fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 18px;
+  border: 1px solid #ddd3c2;
+  border-radius: 18px;
+}
+
+.system-configuration-form legend {
+  padding: 0 7px;
+  font-weight: 800;
+}
+
+.system-profile-choices {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.system-backend-choices {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.system-choice {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 13px;
+  border: 1px solid #ddd3c2;
+  border-radius: 14px;
+  background: #f6f2ea;
+  color: #14213d;
+  cursor: pointer;
+}
+
+.system-choice:has(input:checked) {
+  border-color: #14213d;
+  box-shadow: inset 0 0 0 1px #14213d;
+}
+
+.system-choice.unsupported {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.system-choice input {
+  width: auto;
+  margin: 3px 0 0;
+}
+
+.system-choice strong,
+.system-choice small {
+  display: block;
+}
+
+.system-choice strong {
+  font-size: 0.95rem;
+}
+
+.system-choice small {
+  margin-top: 3px;
+  text-transform: none;
+}
+
+.system-choice em {
+  grid-column: 2;
+  color: #9f2d20;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.system-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #eadfce;
+}
+
+.system-fields label {
+  color: #14213d;
+}
+
+.system-fields.hidden {
+  display: none;
+}
+
+.mysql-tls-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #5f5a50;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.system-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+}
+
+.system-checkbox input {
+  width: auto;
+}
+
+.secret-field {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.secret-field input {
+  grid-column: 1 / -1;
+}
+
+.system-configuration-form :disabled {
+  cursor: not-allowed;
+}
+
+.system-configuration-form fieldset:disabled input {
+  opacity: 0.75;
+}
+
+.system-save-button {
+  justify-self: start;
+  width: auto;
+}
+
+.backup-configuration {
+  min-width: 0;
+}
+
+.backup-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.backup-rclone-config {
+  grid-column: 1 / -1;
+}
+
+.backup-rclone-config textarea {
+  min-height: 190px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.backup-rclone-config small {
+  margin-top: 5px;
+  text-transform: none;
+}
+
+.backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.backup-actions button {
+  width: auto;
+}
+
+.backup-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.backup-last-run {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #eadfce;
+}
+
+.backup-last-run h3 {
+  margin-top: 0;
+}
+
+.backup-recovery {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #eadfce;
+}
+
+.backup-recovery-heading h3 {
+  margin-top: 3px;
+}
+
+.backup-recovery-warning {
+  margin-top: 14px;
+  padding: 16px 18px;
+  border: 1px solid #c87a6f;
+  border-left: 5px solid #9f2d20;
+  border-radius: 14px;
+  background: #fff1ed;
+  color: #7d241a;
+}
+
+.backup-recovery-warning strong {
+  color: #7d241a;
+  font-size: 1rem;
+}
+
+.backup-recovery-warning p {
+  margin: 5px 0 0;
+  color: #7d241a;
+}
+
+.backup-recovery-controls {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.backup-recovery-controls label {
+  color: #14213d;
+}
+
+.backup-recovery-controls button {
+  width: auto;
+}
+
+.backup-restore-button {
+  background: #9f2d20;
+  color: #fffaf0;
+}
+
+.backup-recovery-controls button:disabled,
+.backup-recovery-controls select:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.backup-recovery-accepted {
+  padding: 14px;
+  border: 1px solid #8ea98f;
+  border-radius: 14px;
+  background: #eef6ed;
+  color: #285c2a;
+  font-weight: 700;
 }
 
 .inline-form {
@@ -1298,6 +1721,14 @@ td:nth-child(5) {
   margin-bottom: 14px;
 }
 
+.case-category-summary {
+  margin-top: 18px;
+}
+
+.case-category-summary.hidden {
+  display: none;
+}
+
 .asset-relation-summary span {
   padding: 12px;
   border-radius: 14px;
@@ -1544,6 +1975,37 @@ small {
     grid-template-columns: 1fr;
   }
 
+  .system-profile-choices,
+  .system-backend-choices,
+  .system-fields,
+  .backup-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .backup-rclone-config {
+    grid-column: auto;
+  }
+
+  .backup-actions {
+    display: grid;
+  }
+
+  .backup-actions button {
+    width: 100%;
+  }
+
+  .backup-recovery-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .backup-recovery-controls button {
+    width: 100%;
+  }
+
+  .system-config-heading {
+    display: grid;
+  }
+
   .main-category-list {
     grid-template-columns: 1fr;
   }
@@ -1561,6 +2023,10 @@ small {
     grid-template-columns: 1fr;
   }
 
+  .manual-transaction-form {
+    grid-template-columns: 1fr;
+  }
+
   .period-filter {
     grid-template-columns: 1fr;
   }
@@ -1575,14 +2041,6 @@ small {
 
   .pie-chart-layout {
     grid-template-columns: 1fr;
-  }
-
-  .dashboard-account-button {
-    grid-template-columns: 1fr;
-  }
-
-  .dashboard-account-button small {
-    text-align: left;
   }
 
   .subcategory-heading {

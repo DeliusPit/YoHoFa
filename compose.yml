@@ -24,6 +24,33 @@ services:
     networks:
       - geldzaken-backend
 
+  mysql:
+    image: mysql:8.4
+    container_name: geldzaken-mysql
+    restart: unless-stopped
+    profiles: ["mysql"]
+
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-geldzaken}
+      MYSQL_USER: ${MYSQL_USER:-geldzaken}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
+
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u$${MYSQL_USER} -p$${MYSQL_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+    ports:
+      - "127.0.0.1:3306:3306"
+
+    networks:
+      - geldzaken-backend
+
 
   minio:
     image: minio/minio:latest
@@ -61,23 +88,36 @@ services:
     ports:
       - "8080:8080"
 
+    env_file:
+      - path: ./config/.env
+        required: false
+
     environment:
       APP_ENV: production
       HTTP_ADDR: :8080
-      STORE_BACKEND: postgres
       WEB_DIR: /app/web/dist
+      CONFIG_PATH: /app/config/storage.json
+      CONFIG_EDITABLE: ${CONFIG_EDITABLE:-true}
+      CONFIG_BOOTSTRAP_FROM_ENV: ${CONFIG_BOOTSTRAP_FROM_ENV:-false}
+      STORAGE_PROFILE: ${STORAGE_PROFILE:-server}
+      STORE_BACKEND: ${STORE_BACKEND:-postgres}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      DATABASE_PATH: ${DATABASE_PATH:-/app/data/sqlite/geldzaken.db}
+      DATABASE_DATA_ROOT: /app/data/sqlite
+      BACKUP_WORK_ROOT: /app/data/backup-work
+      OBJECT_BACKEND: ${OBJECT_BACKEND:-s3}
+      OBJECT_FILESYSTEM_ROOT: ${OBJECT_FILESYSTEM_ROOT:-/app/data/objects}
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET: ${MINIO_BUCKET:-geldzaken-documents}
       MINIO_USE_SSL: "false"
 
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
+    volumes:
+      - ./config:/app/config
+      - ./data/objects:/app/data/objects
+      - ./data/sqlite:/app/data/sqlite
+      - ./data/backup-work:/app/data/backup-work
 
     networks:
       - geldzaken-backend

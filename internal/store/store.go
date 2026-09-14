@@ -55,6 +55,7 @@ type Account struct {
 	Type         string `json:"type"`
 	Owner        string `json:"owner"`
 	BankProfile  string `json:"bankProfile"`
+	Currency     string `json:"currency"`
 	SortOrder    int    `json:"sortOrder"`
 	BalanceCents int64  `json:"balanceCents"`
 }
@@ -193,6 +194,8 @@ func Open(ctx context.Context, backend string, databaseURL string, databasePath 
 		return OpenSQLite(ctx, databasePath)
 	case "postgres":
 		return OpenPostgres(ctx, databaseURL)
+	case "mysql":
+		return OpenMySQL(ctx, databaseURL)
 	default:
 		return nil, fmt.Errorf("unknown store backend %q", backend)
 	}
@@ -201,7 +204,7 @@ func Open(ctx context.Context, backend string, databaseURL string, databasePath 
 func OpenMemory() *Memory {
 	return &Memory{
 		accounts: []Account{
-			{ID: 1, Name: "Triodos betaalrekening", IBAN: "NL18TRIO0254363105", Type: "checking", Owner: "Huishouden", BankProfile: "triodos", SortOrder: 10},
+			{ID: 1, Name: "Triodos betaalrekening", IBAN: "NL18TRIO0254363105", Type: "checking", Owner: "Huishouden", BankProfile: "triodos", Currency: "EUR", SortOrder: 10},
 		},
 		mainCategories: []MainCategory{
 			{ID: 1, Name: "Inkomsten", SortOrder: 10},
@@ -630,6 +633,7 @@ func normalizeAccountInput(input SaveAccount) (Account, error) {
 		Type:        strings.TrimSpace(input.Type),
 		Owner:       strings.TrimSpace(input.Owner),
 		BankProfile: strings.TrimSpace(input.BankProfile),
+		Currency:    "EUR",
 	}
 	if account.Name == "" {
 		return Account{}, fmt.Errorf("name is required")

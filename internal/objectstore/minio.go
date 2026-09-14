@@ -19,25 +19,39 @@ type Store interface {
 }
 
 type MinIO struct {
-	mu        sync.Mutex
-	client    *minio.Client
-	endpoint  string
-	accessKey string
-	secretKey string
-	bucket    string
-	useSSL    bool
+	mu           sync.Mutex
+	client       *minio.Client
+	endpoint     string
+	accessKey    string
+	secretKey    string
+	bucket       string
+	useSSL       bool
+	region       string
+	pathStyle    bool
+	createBucket bool
 }
 
-func Open(ctx context.Context, endpoint, accessKey, secretKey, bucket string, useSSL bool) (*MinIO, error) {
-	store := &MinIO{endpoint: endpoint, accessKey: accessKey, secretKey: secretKey, bucket: bucket, useSSL: useSSL}
-	if endpoint == "" || accessKey == "" || secretKey == "" || bucket == "" {
-		return store, fmt.Errorf("minio configuration is incomplete")
+type Config struct {
+	Endpoint     string
+	AccessKey    string
+	SecretKey    string
+	Bucket       string
+	UseTLS       bool
+	Region       string
+	PathStyle    bool
+	CreateBucket bool
+}
+
+func Open(ctx context.Context, cfg Config) (*MinIO, error) {
+	store := &MinIO{endpoint: cfg.Endpoint, accessKey: cfg.AccessKey, secretKey: cfg.SecretKey, bucket: cfg.Bucket, useSSL: cfg.UseTLS, region: cfg.Region, pathStyle: cfg.PathStyle, createBucket: cfg.CreateBucket}
+	if cfg.Endpoint == "" || cfg.AccessKey == "" || cfg.SecretKey == "" || cfg.Bucket == "" {
+		return store, fmt.Errorf("S3 configuration is incomplete")
 	}
-	return store, store.ensureBucket(ctx)
+	return store, store.checkBucket(ctx)
 }
 
 func (s *MinIO) Ping(ctx context.Context) error {
-	return s.ensureBucket(ctx)
+	return s.checkBucket(ctx)
 }
 
 func (s *MinIO) Put(ctx context.Context, objectKey string, data []byte, contentType string) error {
@@ -74,7 +88,7 @@ func (s *MinIO) Delete(ctx context.Context, objectKey string) error {
 }
 
 func (s *MinIO) readyClient(ctx context.Context) (*minio.Client, error) {
-	if err := s.ensureBucket(ctx); err != nil {
+	if err := s.checkBucket(ctx); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
@@ -82,7 +96,7 @@ func (s *MinIO) readyClient(ctx context.Context) (*minio.Client, error) {
 	return s.client, nil
 }
 
-func (s *MinIO) ensureBucket(ctx context.Context) error {
+func (s *MinIO) checkBucket(ctx context.Context) error {
 	client, err := s.getClient()
 	if err != nil {
 		return err
@@ -92,7 +106,10 @@ func (s *MinIO) ensureBucket(ctx context.Context) error {
 		return err
 	}
 	if !exists {
-		if err := client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{}); err != nil {
+		if !s.createBucket {
+			return fmt.Errorf("S3 bucket is unavailable")
+		}
+		if err := client.MakeBucket(ctx, s.bucket, minio.MakeBucketOptions{Region: s.region}); err != nil {
 			exists, checkErr := client.BucketExists(ctx, s.bucket)
 			if checkErr != nil || !exists {
 				return err
@@ -109,11 +126,17 @@ func (s *MinIO) getClient() (*minio.Client, error) {
 		return s.client, nil
 	}
 	if s.endpoint == "" || s.accessKey == "" || s.secretKey == "" || s.bucket == "" {
-		return nil, fmt.Errorf("minio configuration is incomplete")
+		return nil, fmt.Errorf("S3 configuration is incomplete")
+	}
+	bucketLookup := minio.BucketLookupDNS
+	if s.pathStyle {
+		bucketLookup = minio.BucketLookupPath
 	}
 	client, err := minio.New(s.endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(s.accessKey, s.secretKey, ""),
-		Secure: s.useSSL,
+		Creds:        credentials.NewStaticV4(s.accessKey, s.secretKey, ""),
+		Secure:       s.useSSL,
+		Region:       s.region,
+		BucketLookup: bucketLookup,
 	})
 	if err != nil {
 		return nil, err

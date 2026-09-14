@@ -77,18 +77,35 @@ func (s *Postgres) CreateMainCategory(ctx context.Context, input CreateMainCateg
 	if name.err != nil {
 		return MainCategory{}, name.err
 	}
-	var sortOrder int
-	if err := s.pool.QueryRow(ctx, `select coalesce(max(sort_order), 0) + 10 from main_categories`).Scan(&sortOrder); err != nil {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
 		return MainCategory{}, err
 	}
-
+	defer tx.Rollback(ctx)
+	var sortOrder int
+	if err := tx.QueryRow(ctx, `select coalesce(max(sort_order), 0) + 10 from main_categories`).Scan(&sortOrder); err != nil {
+		return MainCategory{}, err
+	}
 	var item MainCategory
-	err := s.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		insert into main_categories (name, sort_order)
 		values ($1, $2)
 		returning id, name, sort_order
 	`, name.value, sortOrder).Scan(&item.ID, &item.Name, &item.SortOrder)
-	return item, err
+	if err != nil {
+		return MainCategory{}, err
+	}
+	var caseID int64
+	if err := tx.QueryRow(ctx, `insert into cases (household_id,main_category_id,case_type,title,status) values ((select id from households order by id limit 1),$1,$2,$3,'active') returning id`, item.ID, CaseTypeMainCategory, item.Name).Scan(&caseID); err != nil {
+		return MainCategory{}, err
+	}
+	if err := appendDomainEvent(ctx, tx, AppendDomainEvent{EntityType: ObjectTypeCase, EntityID: caseID, EventType: "case_created", CurrentDate: true, Description: "Dossier aangemaakt"}); err != nil {
+		return MainCategory{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return MainCategory{}, err
+	}
+	return item, nil
 }
 
 func (s *Postgres) UpdateMainCategory(ctx context.Context, id int64, input UpdateMainCategory) (MainCategory, error) {
@@ -96,32 +113,74 @@ func (s *Postgres) UpdateMainCategory(ctx context.Context, id int64, input Updat
 	if name.err != nil {
 		return MainCategory{}, name.err
 	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return MainCategory{}, err
+	}
+	defer tx.Rollback(ctx)
 	var item MainCategory
-	err := s.pool.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		update main_categories set name = $1 where id = $2 returning id, name, sort_order
 	`, name.value, id).Scan(&item.ID, &item.Name, &item.SortOrder)
 	if err == pgx.ErrNoRows {
 		return MainCategory{}, fmt.Errorf("main category not found")
 	}
-	return item, err
+	if err != nil {
+		return MainCategory{}, err
+	}
+	var caseID int64
+	if err := tx.QueryRow(ctx, `update cases set title=$1,updated_at=now() where main_category_id=$2 returning id`, item.Name, id).Scan(&caseID); err != nil {
+		return MainCategory{}, err
+	}
+	if err := appendDomainEvent(ctx, tx, AppendDomainEvent{EntityType: ObjectTypeCase, EntityID: caseID, EventType: "case_updated", CurrentDate: true, Description: "Dossier bijgewerkt"}); err != nil {
+		return MainCategory{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return MainCategory{}, err
+	}
+	return item, nil
 }
 
 func (s *Postgres) DeleteMainCategory(ctx context.Context, id int64) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
 	var categoryCount int
-	if err := s.pool.QueryRow(ctx, `select count(*) from categories where main_category_id = $1`, id).Scan(&categoryCount); err != nil {
+	if err := tx.QueryRow(ctx, `select count(*) from categories where main_category_id = $1`, id).Scan(&categoryCount); err != nil {
 		return err
 	}
 	if categoryCount > 0 {
 		return fmt.Errorf("main category still has %d subcategories", categoryCount)
 	}
-	result, err := s.pool.Exec(ctx, `delete from main_categories where id = $1`, id)
+	var caseID int64
+	if err := tx.QueryRow(ctx, `select id from cases where main_category_id=$1 for update`, id).Scan(&caseID); err == pgx.ErrNoRows {
+		return fmt.Errorf("main category not found")
+	} else if err != nil {
+		return err
+	}
+	var relationCount int
+	if err := tx.QueryRow(ctx, `select count(*) from entity_relations where (source_type=$1 and source_id=$2) or (target_type=$1 and target_id=$2)`, ObjectTypeCase, caseID).Scan(&relationCount); err != nil {
+		return err
+	}
+	if relationCount > 0 {
+		return fmt.Errorf("managed case still has %d relations", relationCount)
+	}
+	if err := cleanupDomainEvents(ctx, tx, ObjectTypeCase, caseID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `delete from cases where id=$1`, caseID); err != nil {
+		return err
+	}
+	result, err := tx.Exec(ctx, `delete from main_categories where id = $1`, id)
 	if err != nil {
 		return err
 	}
 	if result.RowsAffected() == 0 {
 		return fmt.Errorf("main category not found")
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func (s *Postgres) Categories(ctx context.Context) ([]Category, error) {
@@ -212,7 +271,7 @@ func (s *Postgres) DeleteCategory(ctx context.Context, id int64) error {
 
 func (s *Postgres) Accounts(ctx context.Context) ([]Account, error) {
 	rows, err := s.pool.Query(ctx, `
-		select accounts.id, accounts.name, coalesce(accounts.iban, ''), accounts.account_type, coalesce(accounts.owner_name, ''), accounts.bank_profile, accounts.sort_order,
+		select accounts.id, accounts.name, coalesce(accounts.iban, ''), accounts.account_type, coalesce(accounts.owner_name, ''), accounts.bank_profile, accounts.currency, accounts.sort_order,
 			accounts.opening_balance_cents + coalesce(sum(case when transactions.hidden = false then transactions.amount_cents else 0 end), 0) as balance_cents
 		from accounts
 		left join transactions on transactions.account_id = accounts.id
@@ -227,7 +286,7 @@ func (s *Postgres) Accounts(ctx context.Context) ([]Account, error) {
 	items := []Account{}
 	for rows.Next() {
 		var item Account
-		if err := rows.Scan(&item.ID, &item.Name, &item.IBAN, &item.Type, &item.Owner, &item.BankProfile, &item.SortOrder, &item.BalanceCents); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.IBAN, &item.Type, &item.Owner, &item.BankProfile, &item.Currency, &item.SortOrder, &item.BalanceCents); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -568,13 +627,13 @@ func (s *Postgres) MainCategoryPeriodTotals(ctx context.Context, filter PeriodRe
 func (s *Postgres) account(ctx context.Context, id int64) (Account, error) {
 	var item Account
 	err := s.pool.QueryRow(ctx, `
-		select accounts.id, accounts.name, coalesce(accounts.iban, ''), accounts.account_type, coalesce(accounts.owner_name, ''), accounts.bank_profile, accounts.sort_order,
+		select accounts.id, accounts.name, coalesce(accounts.iban, ''), accounts.account_type, coalesce(accounts.owner_name, ''), accounts.bank_profile, accounts.currency, accounts.sort_order,
 			accounts.opening_balance_cents + coalesce(sum(case when transactions.hidden = false then transactions.amount_cents else 0 end), 0) as balance_cents
 		from accounts
 		left join transactions on transactions.account_id = accounts.id
 		where accounts.id = $1
 		group by accounts.id
-	`, id).Scan(&item.ID, &item.Name, &item.IBAN, &item.Type, &item.Owner, &item.BankProfile, &item.SortOrder, &item.BalanceCents)
+	`, id).Scan(&item.ID, &item.Name, &item.IBAN, &item.Type, &item.Owner, &item.BankProfile, &item.Currency, &item.SortOrder, &item.BalanceCents)
 	return item, err
 }
 
@@ -607,6 +666,20 @@ func (s *Postgres) seedDefaults(ctx context.Context) error {
 				return err
 			}
 		}
+	}
+	if _, err := s.pool.Exec(ctx, `
+		insert into cases (household_id, main_category_id, case_type, title, status, created_at, updated_at)
+		select (select id from households order by id limit 1), main_categories.id, 'main_category', main_categories.name, 'active', main_categories.created_at, main_categories.created_at
+		from main_categories where not exists (select 1 from cases where cases.main_category_id = main_categories.id)
+	`); err != nil {
+		return err
+	}
+	if _, err := s.pool.Exec(ctx, `
+		insert into domain_events (entity_type, entity_id, event_type, event_date, description, created_at)
+		select 'case', cases.id, 'case_created', (cases.created_at at time zone 'UTC')::date, 'Dossier aangemaakt', cases.created_at
+		from cases where cases.main_category_id is not null on conflict do nothing
+	`); err != nil {
+		return err
 	}
 	var accountCount int
 	if err := s.pool.QueryRow(ctx, `select count(*) from accounts`).Scan(&accountCount); err != nil {
@@ -681,7 +754,7 @@ create table if not exists main_categories (
 create table if not exists categories (
     id bigserial primary key,
     household_id bigint not null default 1 references households(id) on delete cascade,
-    main_category_id bigint references main_categories(id) on delete cascade,
+    main_category_id bigint,
     name text not null,
     kind text not null check (kind in ('income', 'expense', 'transfer')),
     purpose text not null default 'daily' check (purpose in ('daily', 'reservation', 'investment')),
@@ -784,6 +857,7 @@ create index if not exists liabilities_household_type_status_idx on liabilities(
 create table if not exists cases (
     id bigserial primary key,
     household_id bigint not null references households(id) on delete cascade,
+    main_category_id bigint references main_categories(id) on delete cascade,
     case_type text not null check (btrim(case_type) <> ''),
     title text not null check (btrim(title) <> ''),
     description text,
@@ -796,6 +870,18 @@ create table if not exists cases (
 );
 
 create index if not exists cases_household_type_status_title_idx on cases(household_id, case_type, status, title);
+alter table cases add column if not exists main_category_id bigint;
+do $$ begin
+    if not exists (select 1 from pg_constraint where conname = 'cases_main_category_fk') then
+        alter table cases add constraint cases_main_category_fk foreign key (main_category_id) references main_categories(id) on delete cascade;
+    end if;
+end $$;
+create unique index if not exists cases_main_category_unique_idx on cases(main_category_id) where main_category_id is not null;
+
+insert into cases (household_id, main_category_id, case_type, title, status, created_at, updated_at)
+select (select id from households order by id limit 1), main_categories.id, 'main_category', main_categories.name, 'active', main_categories.created_at, main_categories.created_at
+from main_categories
+where not exists (select 1 from cases where cases.main_category_id = main_categories.id);
 
 create table if not exists domain_events (
     id bigserial primary key,
@@ -955,4 +1041,5 @@ insert into schema_migrations (version) values ('005_entity_relations') on confl
 insert into schema_migrations (version) values ('006_liabilities') on conflict (version) do nothing;
 insert into schema_migrations (version) values ('007_cases') on conflict (version) do nothing;
 insert into schema_migrations (version) values ('008_domain_events') on conflict (version) do nothing;
+insert into schema_migrations (version) values ('009_main_category_cases') on conflict (version) do nothing;
 `

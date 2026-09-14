@@ -53,7 +53,7 @@ func MigrateSQLiteToPostgres(ctx context.Context, sqlitePath string, databaseURL
 	if err := tx.QueryRow(ctx, `select count(*) from liabilities`).Scan(&liabilityCount); err != nil {
 		return MigrationResult{}, err
 	}
-	if err := tx.QueryRow(ctx, `select count(*) from cases`).Scan(&caseCount); err != nil {
+	if err := tx.QueryRow(ctx, `select count(*) from cases where main_category_id is null`).Scan(&caseCount); err != nil {
 		return MigrationResult{}, err
 	}
 	if err := tx.QueryRow(ctx, `select count(*) from document_links where object_type = $1`, ObjectTypeTransaction).Scan(&transactionDocumentLinkCount); err != nil {
@@ -98,11 +98,17 @@ func MigrateSQLiteToPostgres(ctx context.Context, sqlitePath string, databaseURL
 	`, ObjectTypeAsset, ObjectTypeTransaction, ObjectTypeLiability, ObjectTypeCase).Scan(&entityRelationCount); err != nil {
 		return MigrationResult{}, err
 	}
-	if err := tx.QueryRow(ctx, `select count(*) from domain_events`).Scan(&domainEventCount); err != nil {
+	if err := tx.QueryRow(ctx, `
+		select count(*) from domain_events
+		where not (event_type='case_created' and entity_type='case' and exists(select 1 from cases where cases.id=domain_events.entity_id and cases.main_category_id is not null))
+	`).Scan(&domainEventCount); err != nil {
 		return MigrationResult{}, err
 	}
 	if assetCount > 0 || liabilityCount > 0 || caseCount > 0 || transactionDocumentLinkCount > 0 || assetDocumentLinkCount > 0 || liabilityDocumentLinkCount > 0 || caseDocumentLinkCount > 0 || transactionRelationCount > 0 || assetRelationCount > 0 || liabilityRelationCount > 0 || caseRelationCount > 0 || entityRelationCount > 0 || domainEventCount > 0 {
 		return MigrationResult{}, fmt.Errorf("migration refused: target contains assets, liabilities, cases, object links, or domain events")
+	}
+	if _, err := tx.Exec(ctx, `delete from domain_events where entity_type='case' and exists(select 1 from cases where cases.id=domain_events.entity_id and cases.main_category_id is not null)`); err != nil {
+		return MigrationResult{}, err
 	}
 	if _, err := tx.Exec(ctx, `truncate transactions, categories, accounts, main_categories, households restart identity cascade`); err != nil {
 		return MigrationResult{}, err
@@ -124,8 +130,20 @@ func MigrateSQLiteToPostgres(ctx context.Context, sqlitePath string, databaseURL
 	if result.Transactions, err = migrateTransactions(ctx, sqliteDB, tx); err != nil {
 		return MigrationResult{}, err
 	}
+	if _, err := tx.Exec(ctx, `
+		insert into cases(household_id,main_category_id,case_type,title,status,created_at,updated_at)
+		select (select id from households order by id limit 1),id,'main_category',name,'active',created_at,created_at from main_categories
+	`); err != nil {
+		return MigrationResult{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into domain_events(entity_type,entity_id,event_type,event_date,description,created_at)
+		select 'case',id,'case_created',(created_at at time zone 'UTC')::date,'Dossier aangemaakt',created_at from cases where main_category_id is not null
+	`); err != nil {
+		return MigrationResult{}, err
+	}
 
-	for _, table := range []string{"households", "accounts", "main_categories", "categories", "transactions"} {
+	for _, table := range []string{"households", "accounts", "main_categories", "categories", "transactions", "cases", "domain_events"} {
 		if _, err := tx.Exec(ctx, fmt.Sprintf(`select setval(pg_get_serial_sequence('%s', 'id'), coalesce((select max(id) from %s), 1), true)`, table, table)); err != nil {
 			return MigrationResult{}, err
 		}

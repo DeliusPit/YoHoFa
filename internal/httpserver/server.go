@@ -6,7 +6,9 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,26 +20,36 @@ import (
 	"geldzaken/internal/config"
 	"geldzaken/internal/objectstore"
 	"geldzaken/internal/store"
+	"geldzaken/internal/systembackup"
 )
 
 type Dependencies struct {
-	Config      config.Config
-	Store       store.Backend
-	Documents   store.DocumentRepository
-	Assets      store.AssetRepository
-	Liabilities store.LiabilityRepository
-	Cases       store.CaseRepository
-	Relations   store.EntityRelationRepository
-	Events      store.DomainEventRepository
-	Objects     objectstore.Store
-	Logger      *slog.Logger
+	Config              config.Config
+	Store               store.Backend
+	Documents           store.DocumentRepository
+	Assets              store.AssetRepository
+	Liabilities         store.LiabilityRepository
+	Cases               store.CaseRepository
+	Relations           store.EntityRelationRepository
+	Events              store.DomainEventRepository
+	Objects             objectstore.Store
+	ObjectStoreRequired bool
+	Configuration       *config.Manager
+	SystemBackup        *systembackup.Service
+	Logger              *slog.Logger
 }
 
 func New(deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
+	registerConfigurationRoutes(mux, deps)
+	registerSystemBackupRoutes(mux, deps)
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := deps.Store.Ping(r.Context()); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unhealthy"})
+			return
+		}
+		if deps.ObjectStoreRequired && deps.Objects == nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unhealthy"})
 			return
 		}
@@ -146,6 +158,31 @@ func New(deps Dependencies) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, transactions)
+	})
+
+	mux.HandleFunc("POST /api/v1/transactions", func(w http.ResponseWriter, r *http.Request) {
+		repository, ok := deps.Store.(store.ManualTransactionRepository)
+		if !ok {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "manual_transactions_unavailable"})
+			return
+		}
+		var input store.CreateManualTransaction
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+			return
+		}
+		if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_json"})
+			return
+		}
+		transaction, err := repository.CreateManualTransaction(r.Context(), input)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusCreated, transaction)
 	})
 
 	mux.HandleFunc("GET /api/v1/transactions/years", func(w http.ResponseWriter, r *http.Request) {
