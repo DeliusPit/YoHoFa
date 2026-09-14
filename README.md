@@ -91,6 +91,8 @@ Documentmetadata en koppelingen staan in de geconfigureerde relationele database
 
 Voor Garage bevat `S3_ENDPOINT` alleen `host:poort`, zonder `http://` of pad. Stel `S3_REGION` in op de regio van de Garage-key, gebruik normaal `S3_PATH_STYLE=true` en zet `S3_CREATE_BUCKET=false` wanneer de bucket vooraf in Garage is aangemaakt.
 
+Zie `docs/storage-architecture.md` voor de opslagmatrix, schema-aanpak, parity-checks en geplande migratiepaden.
+
 ### Opslagconfiguratie
 
 `config/storage.json` op de host, gekoppeld als `/app/config/storage.json`, is de gezaghebbende opslagconfiguratie. Het bestand bevat database- en objectopslagcredentials en is daarom geheim: maak geen commit of backup zonder passende versleuteling en toegangsbeperking. Als het bestand bestaat, wint het volledig van alle legacy opslagvariabelen; velden worden nooit afzonderlijk met environment variables samengevoegd. De root `.env` bevat alleen Compose-credentials voor de lokale PostgreSQL-, optionele MySQL- en MinIO-services. Productie-authenticatie en optionele providerneutrale bootstrapwaarden staan lokaal in `config/.env`, gebaseerd op `config/.env.example`, met bestandsmodus `0600`. Zonder zowel `AUTH_USERNAME` als `AUTH_PASSWORD` start de productiebackend niet.

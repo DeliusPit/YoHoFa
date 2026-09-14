@@ -1,3 +1,5 @@
+//go:build !windows
+
 package objectstore
 
 import (
@@ -6,16 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 
 	"golang.org/x/sys/unix"
-)
-
-var (
-	ErrInvalidKey = errors.New("invalid object key")
-	ErrNotFound   = fs.ErrNotExist
 )
 
 type Filesystem struct {
@@ -252,18 +248,6 @@ func (s *Filesystem) Delete(ctx context.Context, objectKey string) error {
 	return nil
 }
 
-func validateObjectKey(key string) error {
-	if len(key) != 64 {
-		return fmt.Errorf("%w: key must contain 64 lowercase hexadecimal characters", ErrInvalidKey)
-	}
-	for i := range key {
-		if (key[i] < '0' || key[i] > '9') && (key[i] < 'a' || key[i] > 'f') {
-			return fmt.Errorf("%w: key must contain 64 lowercase hexadecimal characters", ErrInvalidKey)
-		}
-	}
-	return nil
-}
-
 func (s *Filesystem) openRoot() (int, error) {
 	fd, err := unix.Open(s.root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
@@ -373,8 +357,4 @@ func createTempAt(parentFD int, prefix string) (string, int, error) {
 		return name, fd, nil
 	}
 	return "", -1, fmt.Errorf("could not allocate a unique temporary file")
-}
-
-func objectNotFound(key string) error {
-	return fmt.Errorf("object %s: %w", key, ErrNotFound)
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -69,6 +70,9 @@ func TestFilesystemRejectsInvalidKeysBeforeUsingPaths(t *testing.T) {
 }
 
 func TestFilesystemRejectsSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior depends on Windows privileges")
+	}
 	t.Run("root", func(t *testing.T) {
 		parent := t.TempDir()
 		target := filepath.Join(parent, "target")
@@ -135,6 +139,9 @@ func TestFilesystemRejectsSymlinks(t *testing.T) {
 }
 
 func TestFilesystemModes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not expose Unix permission bits consistently")
+	}
 	parent := t.TempDir()
 	root := filepath.Join(parent, "store")
 	store, err := NewFilesystem(root)
