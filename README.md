@@ -73,6 +73,12 @@ De applicatiecontainer bouwt de Go API uit `cmd/api` en de Vite frontend uit `we
 docker compose -f compose.yml up --build -d
 ```
 
+Controleer de draaiende applicatie daarna met:
+
+```sh
+./scripts/check-runtime.sh
+```
+
 PostgreSQL-data staat onder `data/postgres`; de lokale MinIO-service gebruikt `data/minio`; SQLite-bestanden staan onder `data/sqlite` en objecten van de filesystem-backend onder `data/objects`. MinIO is hier alleen een lokale S3-compatible provider. Voor productie kan dezelfde S3-laag ook naar Garage of een andere S3-compatible dienst wijzen. SQLite-paden moeten absoluut zijn, mogen geen URI of `/` zijn en blijven in Compose beperkt tot `/app/data/sqlite` via `DATABASE_DATA_ROOT`.
 
 Let op: `docker-compose.yml` is een oude PostgreSQL-only helper. Gebruik voor de actuele applicatiestack `compose.yml`.

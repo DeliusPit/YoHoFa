@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
+printf '%s\n' 'Let op: scripts/install-lxc.sh is de legacy SQLite/LXC-deployflow. Gebruik voor de actuele centrale deployment: docker compose -f compose.yml up --build -d' >&2
+
 : "${LXC_HOST:?Set LXC_HOST, for example: LXC_HOST=192.168.1.50}"
 : "${LXC_USER:=root}"
 : "${AUTH_USERNAME:=geldzaken}"

@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
+printf '%s\n' 'Let op: scripts/package-runtime.sh maakt een legacy SQLite runtimepakket. Gebruik Docker Compose voor de actuele centrale deployment.' >&2
+
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_dir=$(dirname "$script_dir")
 
