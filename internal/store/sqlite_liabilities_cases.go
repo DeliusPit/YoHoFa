@@ -162,9 +162,9 @@ func (s *SQLite) CreateCase(ctx context.Context, input SaveCase) (Case, error) {
 	}
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `
-		insert into cases (household_id, case_type, title, description, start_date, end_date, status)
-		values ((select id from households order by id limit 1), ?, ?, ?, ?, ?, ?)
-	`, input.CaseType, input.Title, input.Description, sqliteOptionalDate(input.StartDate), sqliteOptionalDate(input.EndDate), input.Status)
+		insert into cases (household_id, case_type, title, description, start_date, end_date, term_months, status)
+		values ((select id from households order by id limit 1), ?, ?, ?, ?, ?, ?, ?)
+	`, input.CaseType, input.Title, input.Description, sqliteOptionalDate(input.StartDate), sqliteOptionalDate(input.EndDate), nullablePositiveInt(input.TermMonths), input.Status)
 	if err != nil {
 		return Case{}, err
 	}
@@ -206,9 +206,9 @@ func (s *SQLite) UpdateCase(ctx context.Context, id int64, input SaveCase) (Case
 		return Case{}, fmt.Errorf("case is managed by a main category")
 	}
 	_, err = tx.ExecContext(ctx, `
-		update cases set case_type = ?, title = ?, description = ?, start_date = ?, end_date = ?, status = ?,
+		update cases set case_type = ?, title = ?, description = ?, start_date = ?, end_date = ?, term_months = ?, status = ?,
 			updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') where id = ?
-	`, input.CaseType, input.Title, input.Description, sqliteOptionalDate(input.StartDate), sqliteOptionalDate(input.EndDate), input.Status, id)
+	`, input.CaseType, input.Title, input.Description, sqliteOptionalDate(input.StartDate), sqliteOptionalDate(input.EndDate), nullablePositiveInt(input.TermMonths), input.Status, id)
 	if err != nil {
 		return Case{}, err
 	}
@@ -294,6 +294,6 @@ const sqliteLiabilitySelect = `
 	from liabilities`
 
 const sqliteCaseSelect = `
-	select id, household_id, coalesce(main_category_id, 0), case_type, title, coalesce(description, ''), coalesce(start_date, ''), coalesce(end_date, ''),
+	select id, household_id, coalesce(main_category_id, 0), case_type, title, coalesce(description, ''), coalesce(start_date, ''), coalesce(end_date, ''), coalesce(term_months, 0),
 		status, created_at, updated_at
 	from cases`

@@ -857,13 +857,14 @@ create index if not exists liabilities_household_type_status_idx on liabilities(
 create table if not exists cases (
     id bigserial primary key,
     household_id bigint not null references households(id) on delete cascade,
-    main_category_id bigint references main_categories(id) on delete cascade,
-    case_type text not null check (btrim(case_type) <> ''),
+	main_category_id bigint references main_categories(id) on delete cascade,
+	case_type text not null check (btrim(case_type) <> ''),
     title text not null check (btrim(title) <> ''),
     description text,
-    start_date date,
-    end_date date,
-    status text not null default 'active' check (status in ('planned', 'active', 'completed', 'archived')),
+	start_date date,
+	end_date date,
+	term_months integer check (term_months is null or term_months > 0),
+	status text not null default 'active' check (status in ('planned', 'active', 'completed', 'archived')),
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
     check (end_date is null or start_date is null or end_date >= start_date)
@@ -871,10 +872,16 @@ create table if not exists cases (
 
 create index if not exists cases_household_type_status_title_idx on cases(household_id, case_type, status, title);
 alter table cases add column if not exists main_category_id bigint;
+alter table cases add column if not exists term_months integer;
 do $$ begin
     if not exists (select 1 from pg_constraint where conname = 'cases_main_category_fk') then
         alter table cases add constraint cases_main_category_fk foreign key (main_category_id) references main_categories(id) on delete cascade;
     end if;
+end $$;
+do $$ begin
+	if not exists (select 1 from pg_constraint where conname = 'cases_term_months_check') then
+		alter table cases add constraint cases_term_months_check check (term_months is null or term_months > 0);
+	end if;
 end $$;
 create unique index if not exists cases_main_category_unique_idx on cases(main_category_id) where main_category_id is not null;
 

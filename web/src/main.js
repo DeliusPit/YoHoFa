@@ -20,16 +20,12 @@ let assetListState = [];
 let selectedAssetState = null;
 let selectedSavingsAccountState = null;
 let assetValuationsState = [];
-let assetRelationDocumentsState = [];
-let assetRelationTransactionsState = [];
-let assetRelationLiabilitiesState = [];
+let assetContractsState = [];
 let assetsLoaded = false;
 let assetDetailRequestID = 0;
 let liabilitiesState = [];
 let selectedLiabilityState = null;
-let liabilityRelationAssetsState = [];
-let liabilityRelationDocumentsState = [];
-let liabilityRelationTransactionsState = [];
+let liabilityContractsState = [];
 let liabilitiesLoaded = false;
 let liabilityDetailRequestID = 0;
 let casesState = [];
@@ -146,7 +142,6 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
         <button type="button" class="main-tab active" data-main-target="dashboard">Dashboard</button>
         <button type="button" class="main-tab" data-main-target="transactions">Inkomsten &amp; uitgaven</button>
         <button type="button" class="main-tab" data-main-target="wealth">Vermogen</button>
-        <button type="button" class="main-tab" data-main-target="cases">Dossiers</button>
         <button type="button" class="main-tab" data-main-target="configuration">Configuratie</button>
       </nav>
 
@@ -172,12 +167,20 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
             </form>
             <div id="chart-result" class="chart-placeholder">Kies een periode voor uitgaven per hoofdcategorie.</div>
           </details>
-          <details class="dashboard-panel" open>
-            <summary><span>Vermogen</span><strong id="dashboard-net-worth">Laden...</strong></summary>
-            <div id="dashboard-wealth-summary" class="dashboard-wealth-summary" aria-live="polite">
-              <p>Bezittingen en schulden laden...</p>
-            </div>
-          </details>
+          <div class="dashboard-side-column">
+            <details class="dashboard-panel" open>
+              <summary><span>Vermogen</span><strong id="dashboard-net-worth">Laden...</strong></summary>
+              <div id="dashboard-wealth-summary" class="dashboard-wealth-summary" aria-live="polite">
+                <p>Bezittingen en schulden laden...</p>
+              </div>
+            </details>
+            <details class="dashboard-panel" open>
+              <summary><span>Contracten</span><strong id="dashboard-contract-count">Laden...</strong></summary>
+              <div id="dashboard-contracts" class="dashboard-contracts" aria-live="polite">
+                <p>Contracten laden...</p>
+              </div>
+            </details>
+          </div>
         </div>
         <section class="dashboard-category-transactions transaction-panel" aria-label="Dashboardtransacties">
           <div class="panel-heading">
@@ -320,10 +323,10 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
                 <nav class="asset-detail-tabs" aria-label="Bezitting onderdelen">
                   <button type="button" class="asset-detail-tab active" data-asset-detail-target="overview">Overzicht</button>
                   <button type="button" class="asset-detail-tab" data-asset-detail-target="value">Waarde</button>
+                  <button type="button" class="asset-detail-tab" data-asset-detail-target="contracts">Contracten</button>
                   <button type="button" class="asset-detail-tab" data-asset-detail-target="documents">Documenten</button>
-                   <button type="button" class="asset-detail-tab" data-asset-detail-target="transactions">Transacties</button>
-                   <button type="button" class="asset-detail-tab" data-asset-detail-target="relations">Relaties</button>
-                   <button type="button" class="asset-detail-tab" data-asset-detail-target="timeline">Tijdlijn</button>
+                  <button type="button" class="asset-detail-tab" data-asset-detail-target="transactions">Transacties</button>
+                  <button type="button" class="asset-detail-tab" data-asset-detail-target="timeline">Tijdlijn</button>
                 </nav>
                 <section class="asset-detail-section active" data-asset-detail-section="overview" id="asset-overview"></section>
                 <section class="asset-detail-section" data-asset-detail-section="value">
@@ -339,6 +342,19 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
                   </form>
                   <div id="asset-valuation-list" class="asset-valuation-list"></div>
                 </section>
+                <section class="asset-detail-section" data-asset-detail-section="contracts">
+                  <form id="asset-contract-form" class="asset-form case-form">
+                    <input name="id" type="hidden" />
+                    <label>Titel <input name="title" type="text" required /></label>
+                    <label>Startdatum <input name="startDate" type="date" /></label>
+                    <label>Einddatum <input name="endDate" type="date" /></label>
+                    <label>Looptijd in maanden <input name="termMonths" type="number" min="1" step="1" inputmode="numeric" /></label>
+                    <label>Status <select name="status" required>${caseStatusOptions('active')}</select></label>
+                    <label class="asset-description-field">Omschrijving <textarea name="description" rows="3"></textarea></label>
+                    <div class="form-actions asset-form-actions"><button type="submit">Contract opslaan</button><button type="button" class="secondary-button hidden" data-asset-action="cancel-contract-edit">Annuleren</button></div>
+                  </form>
+                  <div id="asset-contract-list" class="asset-related-list"></div>
+                </section>
                 <section class="asset-detail-section" data-asset-detail-section="documents">
                   <div id="asset-document-list" class="document-list"></div>
                   <form id="asset-document-upload-form" class="document-form">
@@ -351,18 +367,7 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
                   <form id="asset-transaction-link-form" class="asset-transaction-link-form"><label>Zoek transactie <input name="search" type="search" placeholder="Omschrijving of tegenpartij" /></label><button type="button" class="secondary-button" data-asset-action="search-transactions">Zoeken</button><label>Transactie <select name="transactionId" required></select></label><button type="submit">Transactie koppelen</button></form>
                   <div id="asset-transaction-list" class="asset-related-list"></div>
                 </section>
-                <section class="asset-detail-section" data-asset-detail-section="relations">
-                  <form id="asset-relation-form" class="asset-relation-form">
-                    <label>Objecttype <select name="targetType"><option value="transaction">Transactie</option><option value="document">Document</option><option value="liability">Schuld</option></select></label>
-                    <label>Relatietype <select name="relationType"><option value="relates_to">Heeft betrekking op</option></select></label>
-                    <label class="asset-relation-target">Gerelateerd object <select name="targetId" required></select></label>
-                    <label>Geldig vanaf <input name="validFrom" type="date" /></label><label>Geldig tot <input name="validTo" type="date" /></label>
-                    <label class="asset-relation-notes">Notitie <input name="notes" type="text" /></label>
-                    <button type="submit">Relatie toevoegen</button>
-                  </form>
-                   <div id="asset-relations" class="asset-related-list"></div>
-                 </section>
-                 <section class="asset-detail-section" data-asset-detail-section="timeline"><div id="asset-timeline" class="domain-timeline"></div></section>
+                <section class="asset-detail-section" data-asset-detail-section="timeline"><div id="asset-timeline" class="domain-timeline"></div></section>
               </section>
               <section id="savings-account-detail" class="asset-panel hidden"></section>
               <section id="asset-empty-state" class="asset-panel empty-state"><strong>Kies een bezitting</strong><p>Selecteer een bezitting of maak een nieuwe aan.</p></section>
@@ -373,7 +378,7 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
         <section class="wealth-section" data-wealth-section="liabilities">
           <section id="liabilities-root" class="assets-shell liabilities-shell">
           <header class="assets-heading">
-            <div><p class="eyebrow">Verplichtingen</p><h1>Schulden</h1><p>Beheer schulden en hun documenten, transacties en relaties.</p></div>
+            <div><p class="eyebrow">Verplichtingen</p><h1>Schulden</h1><p>Beheer schulden en hun contracten, documenten en transacties.</p></div>
             <button type="button" class="asset-new-button" data-liability-action="new">Nieuwe schuld</button>
           </header>
           <form id="liability-filter-form" class="asset-filter-form">
@@ -404,12 +409,25 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
                 <div class="asset-detail-heading"><div><small>Schuld</small><h2 id="liability-detail-name"></h2></div><div class="row-actions"><button type="button" class="secondary-button" data-liability-action="edit">Wijzigen</button><button type="button" class="secondary-button" data-liability-action="delete">Verwijderen</button></div></div>
                 <nav class="asset-detail-tabs" aria-label="Schuld onderdelen">
                   <button type="button" class="asset-detail-tab active" data-liability-detail-target="overview">Overzicht</button>
+                  <button type="button" class="asset-detail-tab" data-liability-detail-target="contracts">Contracten</button>
                   <button type="button" class="asset-detail-tab" data-liability-detail-target="documents">Documenten</button>
-                   <button type="button" class="asset-detail-tab" data-liability-detail-target="transactions">Transacties</button>
-                   <button type="button" class="asset-detail-tab" data-liability-detail-target="relations">Relaties</button>
-                   <button type="button" class="asset-detail-tab" data-liability-detail-target="timeline">Tijdlijn</button>
+                  <button type="button" class="asset-detail-tab" data-liability-detail-target="transactions">Transacties</button>
+                  <button type="button" class="asset-detail-tab" data-liability-detail-target="timeline">Tijdlijn</button>
                 </nav>
                 <section class="asset-detail-section active" data-liability-detail-section="overview" id="liability-overview"></section>
+                <section class="asset-detail-section" data-liability-detail-section="contracts">
+                  <form id="liability-contract-form" class="asset-form case-form">
+                    <input name="id" type="hidden" />
+                    <label>Titel <input name="title" type="text" required /></label>
+                    <label>Startdatum <input name="startDate" type="date" /></label>
+                    <label>Einddatum <input name="endDate" type="date" /></label>
+                    <label>Looptijd in maanden <input name="termMonths" type="number" min="1" step="1" inputmode="numeric" /></label>
+                    <label>Status <select name="status" required>${caseStatusOptions('active')}</select></label>
+                    <label class="asset-description-field">Omschrijving <textarea name="description" rows="3"></textarea></label>
+                    <div class="form-actions asset-form-actions"><button type="submit">Contract opslaan</button><button type="button" class="secondary-button hidden" data-liability-action="cancel-contract-edit">Annuleren</button></div>
+                  </form>
+                  <div id="liability-contract-list" class="asset-related-list"></div>
+                </section>
                 <section class="asset-detail-section" data-liability-detail-section="documents">
                   <div id="liability-document-list" class="document-list"></div>
                   <form id="liability-document-upload-form" class="document-form"><label>Bestand <input name="file" type="file" required /></label><label>Documentdatum <input name="documentDate" type="date" /></label><label>Omschrijving <input name="description" type="text" /></label><button type="submit">Uploaden en koppelen</button></form>
@@ -420,18 +438,7 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
                   <form id="liability-transaction-link-form" class="asset-transaction-link-form"><label>Zoek transactie <input name="search" type="search" placeholder="Omschrijving of tegenpartij" /></label><button type="button" class="secondary-button" data-liability-action="search-transactions">Zoeken</button><label>Transactie <select name="transactionId" required></select></label><button type="submit">Transactie koppelen</button></form>
                   <div id="liability-transaction-list" class="asset-related-list"></div>
                 </section>
-                <section class="asset-detail-section" data-liability-detail-section="relations">
-                  <form id="liability-relation-form" class="asset-relation-form">
-                    <label>Objecttype <select name="targetType"><option value="asset">Bezitting</option><option value="transaction">Transactie</option><option value="document">Document</option></select></label>
-                    <label>Relatietype <select name="relationType"><option value="financed_by">Gefinancierd door</option></select></label>
-                    <label class="asset-relation-target">Gerelateerd object <select name="targetId" required></select></label>
-                    <label>Geldig vanaf <input name="validFrom" type="date" /></label><label>Geldig tot <input name="validTo" type="date" /></label>
-                    <label class="asset-relation-notes">Notitie <input name="notes" type="text" /></label>
-                    <button type="submit">Relatie toevoegen</button>
-                  </form>
-                   <div id="liability-relations" class="asset-related-list"></div>
-                 </section>
-                 <section class="asset-detail-section" data-liability-detail-section="timeline"><div id="liability-timeline" class="domain-timeline"></div></section>
+                <section class="asset-detail-section" data-liability-detail-section="timeline"><div id="liability-timeline" class="domain-timeline"></div></section>
               </section>
               <section id="liability-empty-state" class="asset-panel empty-state"><strong>Kies een schuld</strong><p>Selecteer een schuld of maak een nieuwe aan.</p></section>
             </div>
@@ -440,37 +447,37 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
         </section>
       </section>
 
-      <section class="app-tab-section" data-main-section="cases" aria-label="Dossiers">
+      <section class="app-tab-section" data-main-section="cases" aria-label="Contracten">
         <section id="cases-root" class="assets-shell cases-shell">
           <header class="assets-heading dossier-heading">
-            <div><p class="eyebrow">Levensgebeurtenissen</p><h1>Dossiers</h1><p>Bundel gebeurtenissen, documenten, transacties en gerelateerde objecten.</p></div>
-            <button type="button" class="asset-new-button" data-case-action="new">Nieuw dossier</button>
+            <div><p class="eyebrow">Vermogen</p><h1>Contracten</h1><p>Onderhoud contractdetails, documenten, transacties en de gekoppelde bezitting.</p></div>
           </header>
           <form id="case-filter-form" class="asset-filter-form case-filter-form">
-            <label>Type <input name="caseType" type="search" placeholder="Bijvoorbeeld tax_return" /></label>
+            <label>Type <input name="caseType" type="search" placeholder="contract" /></label>
             <label>Status <select name="status"><option value="">Alle statussen</option>${caseStatusOptions()}</select></label>
           </form>
           <div class="assets-layout">
-            <aside class="asset-list-panel"><div id="case-list"><p>Open Dossiers om de lijst te laden.</p></div></aside>
+            <aside class="asset-list-panel"><div id="case-list"><p>Open een contract vanaf Dashboard of Vermogen.</p></div></aside>
             <div class="asset-content">
               <section id="case-form-panel" class="asset-panel hidden">
-                <div class="panel-heading"><h2 id="case-form-title">Nieuw dossier</h2></div>
+                <div class="panel-heading"><h2 id="case-form-title">Contract wijzigen</h2></div>
                 <form id="case-form" class="asset-form case-form">
                   <input name="id" type="hidden" />
                   <label>Titel <input name="title" type="text" required /></label>
                   <label>Type <input name="caseType" type="text" list="case-type-examples" required /></label>
-                  <datalist id="case-type-examples"><option value="tax_return"></option><option value="home_purchase"></option><option value="renovation"></option><option value="estate"></option><option value="insurance_claim"></option><option value="emigration"></option><option value="other"></option></datalist>
+                  <datalist id="case-type-examples"><option value="contract"></option><option value="tax_return"></option><option value="home_purchase"></option><option value="renovation"></option><option value="estate"></option><option value="insurance_claim"></option><option value="emigration"></option><option value="other"></option></datalist>
                   <label>Startdatum <input name="startDate" type="date" /></label>
                   <label>Einddatum <input name="endDate" type="date" /></label>
+                  <label>Looptijd in maanden <input name="termMonths" type="number" min="1" step="1" inputmode="numeric" /></label>
                   <label>Status <select name="status" required>${caseStatusOptions('active')}</select></label>
                   <label class="asset-description-field">Omschrijving <textarea name="description" rows="4"></textarea></label>
                   <div class="form-actions asset-form-actions"><button type="submit">Opslaan</button><button type="button" class="secondary-button" data-case-action="cancel-form">Annuleren</button></div>
                 </form>
               </section>
               <section id="case-detail" class="asset-panel hidden">
-                <div class="asset-detail-heading"><div><small>Dossier</small><h2 id="case-detail-title"></h2></div><div class="row-actions"><button type="button" class="secondary-button" data-case-action="edit">Wijzigen</button><button type="button" class="secondary-button" data-case-action="delete">Verwijderen</button></div></div>
+                <div class="asset-detail-heading"><div><small>Contract</small><h2 id="case-detail-title"></h2></div><div class="row-actions"><button type="button" class="secondary-button" data-case-action="edit">Wijzigen</button><button type="button" class="secondary-button" data-case-action="delete">Verwijderen</button></div></div>
                 <div id="case-category-summary" class="asset-relation-summary case-category-summary hidden" aria-live="polite"></div>
-                <nav class="asset-detail-tabs" aria-label="Dossier onderdelen">
+                <nav class="asset-detail-tabs" aria-label="Contract onderdelen">
                   <button type="button" class="asset-detail-tab active" data-case-detail-target="overview">Overzicht</button>
                   <button type="button" class="asset-detail-tab" data-case-detail-target="documents">Documenten</button>
                   <button type="button" class="asset-detail-tab" data-case-detail-target="transactions">Transacties</button>
@@ -501,7 +508,7 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
                 </section>
                  <section class="asset-detail-section" data-case-detail-section="timeline"><div id="case-timeline" class="domain-timeline"></div></section>
               </section>
-              <section id="case-empty-state" class="asset-panel empty-state"><strong>Kies een dossier</strong><p>Selecteer een dossier of maak een nieuw dossier aan.</p></section>
+                <section id="case-empty-state" class="asset-panel empty-state"><strong>Kies een contract</strong><p>Open een contract vanaf Dashboard of bij een bezitting onder Vermogen.</p></section>
             </div>
           </div>
         </section>
@@ -644,6 +651,7 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
   document.querySelector('#dashboard-transaction-result').addEventListener('click', openDocumentsFromTable);
   document.querySelector('#chart-result').addEventListener('click', handleDashboardChartSelection);
   document.querySelector('#dashboard-wealth-summary').addEventListener('click', handleDashboardWealthNavigation);
+  document.querySelector('#dashboard-contracts').addEventListener('click', handleDashboardContractNavigation);
   document.querySelector('#transaction-result').addEventListener('click', handleAccountPagination);
   document.querySelector('#category-transaction-filter-form select[name="mainCategoryId"]').addEventListener('change', updateCategoryTransactionSubcategories);
   document.querySelector('#category-transaction-filter-form select[name="categoryId"]').addEventListener('change', resetAndLoadDashboardTransactions);
@@ -666,19 +674,17 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
   document.querySelector('#asset-filter-form').addEventListener('change', loadAssets);
   document.querySelector('#asset-form').addEventListener('submit', saveAsset);
   document.querySelector('#asset-valuation-form').addEventListener('submit', saveAssetValuation);
+  document.querySelector('#asset-contract-form').addEventListener('submit', saveAssetContract);
   document.querySelector('#asset-document-upload-form').addEventListener('submit', uploadAssetDocument);
   document.querySelector('#asset-document-link-form').addEventListener('submit', linkExistingAssetDocument);
   document.querySelector('#asset-transaction-link-form').addEventListener('submit', linkAssetTransaction);
-  document.querySelector('#asset-relation-form').addEventListener('submit', saveAssetRelation);
-  document.querySelector('#asset-relation-form select[name="targetType"]').addEventListener('change', updateAssetRelationForm);
   document.querySelector('#liabilities-root').addEventListener('click', handleLiabilityAction);
   document.querySelector('#liability-filter-form').addEventListener('change', loadLiabilities);
   document.querySelector('#liability-form').addEventListener('submit', saveLiability);
+  document.querySelector('#liability-contract-form').addEventListener('submit', saveLiabilityContract);
   document.querySelector('#liability-document-upload-form').addEventListener('submit', uploadLiabilityDocument);
   document.querySelector('#liability-document-link-form').addEventListener('submit', linkExistingLiabilityDocument);
   document.querySelector('#liability-transaction-link-form').addEventListener('submit', linkLiabilityTransaction);
-  document.querySelector('#liability-relation-form').addEventListener('submit', saveLiabilityRelation);
-  document.querySelector('#liability-relation-form select[name="targetType"]').addEventListener('change', updateLiabilityRelationForm);
   document.querySelector('#cases-root').addEventListener('click', handleCaseAction);
   document.querySelector('#case-filter-form input[name="caseType"]').addEventListener('input', loadCases);
   document.querySelector('#case-filter-form').addEventListener('change', loadCases);
@@ -692,6 +698,7 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
   loadDashboardTransactions();
   loadCategoryChart();
   loadDashboardWealth();
+  loadDashboardContracts();
   loadHiddenTransactions();
 }
 
@@ -1677,8 +1684,14 @@ async function handleAssetAction(event) {
   case 'cancel-valuation-edit':
     resetAssetValuationForm();
     break;
-  case 'delete-entity-relation':
-    await deleteAssetRelation(Number(button.dataset.relationId));
+  case 'edit-contract':
+    editAssetContract(Number(button.dataset.contractId));
+    break;
+  case 'open-contract':
+    await openAssetContract(Number(button.dataset.contractId));
+    break;
+  case 'cancel-contract-edit':
+    resetAssetContractForm();
     break;
   }
 }
@@ -1769,33 +1782,33 @@ async function loadAssetDetail(id, targetSection = 'overview') {
   const requestID = ++assetDetailRequestID;
   selectedSavingsAccountState = null;
   try {
-    const [assetResponse, valuationsResponse, documentsResponse, transactionsResponse, relationsResponse, allDocumentsResponse, liabilitiesResponse, eventsResponse] = await Promise.all([
+    const [assetResponse, valuationsResponse, documentsResponse, transactionsResponse, relationsResponse, allDocumentsResponse, casesResponse, eventsResponse] = await Promise.all([
       fetch(`${apiBaseUrl}/api/v1/assets/${id}`), fetch(`${apiBaseUrl}/api/v1/assets/${id}/valuations`),
       fetch(`${apiBaseUrl}/api/v1/assets/${id}/documents`), fetch(`${apiBaseUrl}/api/v1/assets/${id}/transactions`),
       fetch(`${apiBaseUrl}/api/v1/assets/${id}/relations`), fetch(`${apiBaseUrl}/api/v1/documents`),
-      fetch(`${apiBaseUrl}/api/v1/liabilities`), fetch(`${apiBaseUrl}/api/v1/assets/${id}/events`),
+      fetch(`${apiBaseUrl}/api/v1/cases?type=contract`), fetch(`${apiBaseUrl}/api/v1/assets/${id}/events`),
     ]);
-    const [asset, valuations, documentsResult, transactions, relations, allDocumentsResult, liabilities, eventsResult] = await Promise.all([assetResponse.json(), valuationsResponse.json(), documentsResponse.json(), transactionsResponse.json(), relationsResponse.json(), allDocumentsResponse.json(), liabilitiesResponse.json(), eventsResponse.json()]);
+    const [asset, valuations, documentsResult, transactions, relations, allDocumentsResult, contracts, eventsResult] = await Promise.all([assetResponse.json(), valuationsResponse.json(), documentsResponse.json(), transactionsResponse.json(), relationsResponse.json(), allDocumentsResponse.json(), casesResponse.json(), eventsResponse.json()]);
     const documentsUnavailable = documentsResponse.status === 501 || allDocumentsResponse.status === 501;
-    if (!assetResponse.ok || !valuationsResponse.ok || (!documentsResponse.ok && documentsResponse.status !== 501) || !transactionsResponse.ok || !relationsResponse.ok || (!allDocumentsResponse.ok && allDocumentsResponse.status !== 501) || !liabilitiesResponse.ok || !eventsResponse.ok) throw new Error(asset.error || valuations.error || documentsResult.error || transactions.error || relations.error || allDocumentsResult.error || liabilities.error || eventsResult?.error || 'Bezitting laden mislukt');
+    if (!assetResponse.ok || !valuationsResponse.ok || (!documentsResponse.ok && documentsResponse.status !== 501) || !transactionsResponse.ok || !relationsResponse.ok || (!allDocumentsResponse.ok && allDocumentsResponse.status !== 501) || !casesResponse.ok || !eventsResponse.ok) throw new Error(asset.error || valuations.error || documentsResult.error || transactions.error || relations.error || allDocumentsResult.error || contracts.error || eventsResult?.error || 'Bezitting laden mislukt');
     const events = validateDomainEvents(eventsResult);
     if (requestID !== assetDetailRequestID) return;
     const documents = documentsResponse.status === 501 ? [] : documentsResult;
     const allDocuments = allDocumentsResponse.status === 501 ? [] : allDocumentsResult;
     selectedAssetState = asset;
     assetValuationsState = valuations;
-    assetRelationDocumentsState = allDocuments;
-    assetRelationLiabilitiesState = liabilities;
+    assetContractsState = contractsForRelations(contracts, relations, 'asset', asset.id);
     document.querySelector('#asset-detail-name').textContent = asset.name;
     document.querySelector('#asset-overview').innerHTML = renderAssetOverview(asset);
     document.querySelector('#asset-current-value').textContent = formatAssetValue(asset.currentValueCents, asset.currency);
     document.querySelector('#asset-valuation-list').innerHTML = renderAssetValuations(valuations, asset.currency);
     resetAssetValuationForm();
+    document.querySelector('#asset-contract-list').innerHTML = renderAssetContracts(assetContractsState);
+    resetAssetContractForm();
     document.querySelector('#asset-document-list').innerHTML = renderAssetDocuments(documents);
     document.querySelector('#asset-document-status').textContent = documentsUnavailable ? 'Documentopslag is momenteel niet beschikbaar.' : '';
     renderAssetDocumentOptions(allDocuments, documents);
     document.querySelector('#asset-transaction-list').innerHTML = renderAssetTransactions(transactions);
-    document.querySelector('#asset-relations').innerHTML = renderAssetRelations(relations);
     document.querySelector('#asset-timeline').innerHTML = renderDomainTimeline(events);
     document.querySelector('#asset-detail').classList.remove('hidden');
     document.querySelector('#savings-account-detail').classList.add('hidden');
@@ -1803,11 +1816,18 @@ async function loadAssetDetail(id, targetSection = 'overview') {
     document.querySelector('#asset-form-panel').classList.add('hidden');
     document.querySelector('#asset-list').innerHTML = renderAssetList(assetListState);
     switchAssetDetailSection(targetSection);
-    updateAssetRelationForm();
     await loadAssetTransactionCandidates();
   } catch (error) {
     if (requestID === assetDetailRequestID) window.alert(error.message);
   }
+}
+
+function contractsForRelations(contracts, relations, objectType, objectID) {
+  const contractIDs = new Set(relations.filter((relation) => relation.relationType === 'relates_to' && (
+    (relation.sourceType === 'case' && relation.targetType === objectType && relation.targetId === objectID)
+    || (relation.targetType === 'case' && relation.sourceType === objectType && relation.sourceId === objectID)
+  )).map((relation) => relation.sourceType === 'case' ? relation.sourceId : relation.targetId));
+  return contracts.filter((item) => contractIDs.has(item.id));
 }
 
 function renderAssetOverview(asset) {
@@ -1868,6 +1888,72 @@ function resetAssetValuationForm() {
   form.elements.valuationDate.value = localDateValue();
   form.elements.valuationType.value = 'estimate';
   form.querySelector('[data-asset-action="cancel-valuation-edit"]').classList.add('hidden');
+}
+
+function renderAssetContracts(contracts) {
+  if (!contracts.length) return '<p>Nog geen contracten gekoppeld.</p>';
+  return `<ul>${contracts.map((item) => `<li><div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(caseStatusLabel(item.status))}${item.startDate ? ` &middot; vanaf ${escapeHtml(item.startDate)}` : ''}${item.endDate ? ` t/m ${escapeHtml(item.endDate)}` : ''}</small>${item.termMonths ? `<span>Looptijd: ${escapeHtml(String(item.termMonths))} maanden</span>` : ''}${item.description ? `<p>${escapeHtml(item.description)}</p>` : ''}</div><div class="row-actions"><button type="button" class="secondary-button" data-asset-action="open-contract" data-contract-id="${item.id}">Openen</button><button type="button" class="icon-button" data-asset-action="edit-contract" data-contract-id="${item.id}" aria-label="Wijzig contract">&#9998;</button></div></li>`).join('')}</ul>`;
+}
+
+function resetAssetContractForm() {
+  const form = document.querySelector('#asset-contract-form');
+  form.reset();
+  form.elements.id.value = '';
+  form.elements.status.value = 'active';
+  form.querySelector('[data-asset-action="cancel-contract-edit"]').classList.add('hidden');
+}
+
+function editAssetContract(id) {
+  const item = assetContractsState.find((contract) => contract.id === id);
+  if (!item) return;
+  const form = document.querySelector('#asset-contract-form');
+  form.elements.id.value = item.id;
+  form.elements.title.value = item.title;
+  form.elements.description.value = item.description || '';
+  form.elements.startDate.value = item.startDate || '';
+  form.elements.endDate.value = item.endDate || '';
+  form.elements.termMonths.value = item.termMonths || '';
+  form.elements.status.value = item.status || 'active';
+  form.querySelector('[data-asset-action="cancel-contract-edit"]').classList.remove('hidden');
+  switchAssetDetailSection('contracts');
+}
+
+async function saveAssetContract(event) {
+  event.preventDefault();
+  if (!selectedAssetState) return;
+  const form = event.currentTarget;
+  const assetID = selectedAssetState.id;
+  const contractID = Number(form.elements.id.value);
+  const input = {
+    caseType: 'contract',
+    title: form.elements.title.value,
+    description: form.elements.description.value,
+    startDate: form.elements.startDate.value,
+    endDate: form.elements.endDate.value,
+    termMonths: Number(form.elements.termMonths.value),
+    status: form.elements.status.value,
+  };
+  try {
+    const response = await fetch(contractID ? `${apiBaseUrl}/api/v1/cases/${contractID}` : `${apiBaseUrl}/api/v1/cases`, { method: contractID ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+    const item = await response.json();
+    if (!response.ok) throw new Error(item.error || 'Contract opslaan mislukt');
+    if (!contractID) {
+      const relationResponse = await fetch(`${apiBaseUrl}/api/v1/assets/${assetID}/relations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetType: 'case', targetId: item.id, relationType: 'relates_to' }) });
+      if (!relationResponse.ok) throw new Error((await relationResponse.json()).error || 'Contract opgeslagen, maar koppelen aan bezitting mislukt');
+    }
+    await loadAssetDetail(assetID, 'contracts');
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+async function openAssetContract(id) {
+  const form = document.querySelector('#case-filter-form');
+  form.elements.caseType.value = 'contract';
+  form.elements.status.value = '';
+  activateMainSection('cases');
+  await loadCases();
+  await loadCaseDetail(id);
 }
 
 async function deleteAssetValuation(id) {
@@ -1967,10 +2053,8 @@ async function loadAssetTransactionCandidates() {
     if (!response.ok) throw new Error(transactions.error || 'Transacties zoeken mislukt');
     if (selectedAssetState?.id !== assetID) return;
     const select = form.elements.transactionId;
-    assetRelationTransactionsState = transactions;
     select.innerHTML = transactions.length ? `<option value="">Kies een transactie</option>${transactions.map((transaction) => `<option value="${transaction.id}">${escapeHtml(transaction.bookedOn)} · ${escapeHtml(transaction.description)} · ${formatAmount(transaction.amountCents)}</option>`).join('')}` : '<option value="">Geen transacties gevonden</option>';
     select.disabled = !transactions.length;
-    if (document.querySelector('#asset-relation-form').elements.targetType.value === 'transaction') updateAssetRelationForm();
   } catch (error) {
     if (selectedAssetState?.id === assetID) window.alert(error.message);
   }
@@ -2000,67 +2084,8 @@ async function unlinkAssetTransaction(transactionID) {
   await loadAssetDetail(assetID, 'transactions');
 }
 
-function renderAssetRelations(relations) {
-  if (!relations.length) return '<p>Nog geen relaties vastgelegd.</p>';
-  return `<ul>${relations.map((relation) => {
-    const assetIsSource = relation.sourceType === 'asset' && relation.sourceId === selectedAssetState?.id;
-    const relatedType = assetIsSource ? relation.targetType : relation.sourceType;
-    const relatedLabel = assetIsSource ? relation.targetLabel : relation.sourceLabel;
-    const period = relation.validFrom || relation.validTo ? `<small>${escapeHtml(relation.validFrom || '...')} t/m ${escapeHtml(relation.validTo || '...')}</small>` : '';
-    return `<li><div><strong>${escapeHtml(relatedLabel)}</strong><small>${escapeHtml(entityTypeLabel(relatedType))} &middot; ${escapeHtml(relationTypeLabel(relation.relationType))}</small>${period}${relation.notes ? `<p>${escapeHtml(relation.notes)}</p>` : ''}</div><button type="button" class="icon-button danger" data-asset-action="delete-entity-relation" data-relation-id="${relation.id}" aria-label="Verwijder relatie">&#10005;</button></li>`;
-  }).join('')}</ul>`;
-}
-
-function updateAssetRelationForm() {
-  const form = document.querySelector('#asset-relation-form');
-  const targetType = form.elements.targetType.value;
-  const items = targetType === 'document' ? assetRelationDocumentsState : targetType === 'liability' ? assetRelationLiabilitiesState : assetRelationTransactionsState;
-  form.elements.relationType.innerHTML = targetType === 'document'
-    ? '<option value="evidence_for">Bewijs voor</option>'
-    : targetType === 'liability' ? '<option value="financed_by">Gefinancierd door</option>' : '<option value="relates_to">Heeft betrekking op</option>';
-  form.elements.targetId.innerHTML = items.length
-    ? `<option value="">Kies een object</option>${items.map((item) => {
-      if (targetType === 'document') return `<option value="${item.id}">${escapeHtml(item.originalFilename)}</option>`;
-      if (targetType === 'liability') return `<option value="${item.id}">${escapeHtml(item.name)}</option>`;
-      return `<option value="${item.id}">${escapeHtml(item.bookedOn)} &middot; ${escapeHtml(item.description)}</option>`;
-    }).join('')}`
-    : '<option value="">Geen objecten beschikbaar</option>';
-  form.elements.targetId.disabled = !items.length;
-}
-
-async function saveAssetRelation(event) {
-  event.preventDefault();
-  if (!selectedAssetState) return;
-  const form = event.currentTarget;
-  const targetID = Number(form.elements.targetId.value);
-  if (!targetID) return;
-  const assetID = selectedAssetState.id;
-  const input = {
-    targetType: form.elements.targetType.value,
-    targetId: targetID,
-    relationType: form.elements.relationType.value,
-    validFrom: form.elements.validFrom.value,
-    validTo: form.elements.validTo.value,
-    notes: form.elements.notes.value,
-  };
-  const response = await fetch(`${apiBaseUrl}/api/v1/assets/${assetID}/relations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
-  if (!response.ok) return window.alert((await response.json()).error || 'Relatie toevoegen mislukt');
-  form.elements.validFrom.value = '';
-  form.elements.validTo.value = '';
-  form.elements.notes.value = '';
-  await loadAssetDetail(assetID, 'relations');
-}
-
-async function deleteAssetRelation(relationID) {
-  if (!selectedAssetState || !window.confirm('Deze relatie verwijderen?')) return;
-  const assetID = selectedAssetState.id;
-  const response = await fetch(`${apiBaseUrl}/api/v1/assets/${assetID}/relations/${relationID}`, { method: 'DELETE' });
-  if (!response.ok) return window.alert((await response.json()).error || 'Relatie verwijderen mislukt');
-  await loadAssetDetail(assetID, 'relations');
-}
-
 function entityTypeLabel(value) {
-  const labels = { asset: 'Bezitting', liability: 'Schuld', transaction: 'Transactie', document: 'Document', case: 'Dossier' };
+  const labels = { asset: 'Bezitting', liability: 'Schuld', transaction: 'Transactie', document: 'Document', case: 'Contract' };
   return Object.hasOwn(labels, value) ? labels[value] : value;
 }
 
@@ -2133,6 +2158,63 @@ async function loadDashboardWealth() {
 function handleDashboardWealthNavigation(event) {
   const target = event.target.closest('[data-wealth-target]')?.dataset.wealthTarget;
   if (target) activateMainSection('wealth', target);
+}
+
+async function loadDashboardContracts() {
+  const count = document.querySelector('#dashboard-contract-count');
+  const panel = document.querySelector('#dashboard-contracts');
+  if (!count || !panel) return;
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/v1/cases?type=contract`);
+    const contracts = await response.json();
+    if (!response.ok) throw new Error(contracts.error || 'Contracten laden mislukt');
+    const visibleContracts = contracts.filter((item) => item.status !== 'archived');
+    count.textContent = `${visibleContracts.length} actief`;
+    panel.innerHTML = renderDashboardContracts(visibleContracts);
+  } catch (error) {
+    count.textContent = 'Niet beschikbaar';
+    panel.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function renderDashboardContracts(contracts) {
+  const sorted = [...contracts].sort((left, right) => dashboardContractSortValue(left) - dashboardContractSortValue(right) || left.title.localeCompare(right.title, 'nl', { sensitivity: 'base' }));
+  if (!sorted.length) return '<p>Geen actieve contracten.</p>';
+  const today = localDateValue();
+  return `<ol class="contract-timeline"><li class="contract-timeline-today"><span class="contract-timeline-dot"></span><div><strong>Vandaag</strong><time datetime="${today}">${today}</time></div></li>${sorted.slice(0, 8).map((item) => {
+    const actionDate = dashboardContractActionDate(item);
+    const overdue = actionDate && actionDate < localDateValue();
+    return `<li class="contract-timeline-item ${overdue ? 'overdue' : ''}"><span class="contract-timeline-dot"></span><button type="button" class="contract-timeline-card" data-dashboard-contract-id="${item.id}"><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(caseStatusLabel(item.status))}${item.termMonths ? ` · ${escapeHtml(String(item.termMonths))} mnd` : ''}</small></span><time datetime="${escapeHtml(actionDate || '')}">${escapeHtml(actionDate ? dashboardContractDateLabel(actionDate, overdue) : 'Geen datum')}</time></button></li>`;
+  }).join('')}</ol>`;
+}
+
+function dashboardContractSortValue(item) {
+  const actionDate = dashboardContractActionDate(item);
+  return actionDate ? Date.parse(`${actionDate}T00:00:00`) : Number.MAX_SAFE_INTEGER;
+}
+
+function dashboardContractActionDate(item) {
+  if (item.endDate) return item.endDate;
+  if (!item.startDate || !item.termMonths) return '';
+  const date = new Date(`${item.startDate}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return '';
+  date.setMonth(date.getMonth() + Number(item.termMonths));
+  return localDateValue(date);
+}
+
+function dashboardContractDateLabel(actionDate, overdue) {
+  return `${overdue ? 'Verlopen' : 'Actie'} ${actionDate}`;
+}
+
+async function handleDashboardContractNavigation(event) {
+  const contractID = Number(event.target.closest('[data-dashboard-contract-id]')?.dataset.dashboardContractId);
+  if (!contractID) return;
+  const form = document.querySelector('#case-filter-form');
+  form.elements.caseType.value = 'contract';
+  form.elements.status.value = '';
+  activateMainSection('cases');
+  await loadCases();
+  await loadCaseDetail(contractID);
 }
 
 function centsToInput(cents) {
@@ -2213,7 +2295,9 @@ async function handleLiabilityAction(event) {
   case 'unlink-document': await unlinkLiabilityDocument(Number(button.dataset.documentId)); break;
   case 'search-transactions': await loadLiabilityTransactionCandidates(); break;
   case 'unlink-transaction': await unlinkLiabilityTransaction(Number(button.dataset.transactionId)); break;
-  case 'delete-relation': await deleteLiabilityRelation(Number(button.dataset.relationId)); break;
+  case 'edit-contract': editLiabilityContract(Number(button.dataset.contractId)); break;
+  case 'open-contract': await openLiabilityContract(Number(button.dataset.contractId)); break;
+  case 'cancel-contract-edit': resetLiabilityContractForm(); break;
   }
 }
 
@@ -2274,36 +2358,34 @@ async function saveLiability(event) {
 async function loadLiabilityDetail(id, targetSection = 'overview') {
   const requestID = ++liabilityDetailRequestID;
   try {
-    const [liabilityResponse, documentsResponse, transactionsResponse, relationsResponse, allDocumentsResponse, assetsResponse, eventsResponse] = await Promise.all([
+    const [liabilityResponse, documentsResponse, transactionsResponse, relationsResponse, allDocumentsResponse, casesResponse, eventsResponse] = await Promise.all([
       fetch(`${apiBaseUrl}/api/v1/liabilities/${id}`), fetch(`${apiBaseUrl}/api/v1/liabilities/${id}/documents`),
       fetch(`${apiBaseUrl}/api/v1/liabilities/${id}/transactions`), fetch(`${apiBaseUrl}/api/v1/liabilities/${id}/relations`),
-      fetch(`${apiBaseUrl}/api/v1/documents`), fetch(`${apiBaseUrl}/api/v1/assets`), fetch(`${apiBaseUrl}/api/v1/liabilities/${id}/events`),
+      fetch(`${apiBaseUrl}/api/v1/documents`), fetch(`${apiBaseUrl}/api/v1/cases?type=contract`), fetch(`${apiBaseUrl}/api/v1/liabilities/${id}/events`),
     ]);
-    const [liability, documentsResult, transactions, relations, allDocumentsResult, assets, eventsResult] = await Promise.all([liabilityResponse.json(), documentsResponse.json(), transactionsResponse.json(), relationsResponse.json(), allDocumentsResponse.json(), assetsResponse.json(), eventsResponse.json()]);
+    const [liability, documentsResult, transactions, relations, allDocumentsResult, contracts, eventsResult] = await Promise.all([liabilityResponse.json(), documentsResponse.json(), transactionsResponse.json(), relationsResponse.json(), allDocumentsResponse.json(), casesResponse.json(), eventsResponse.json()]);
     const documentsUnavailable = documentsResponse.status === 501 || allDocumentsResponse.status === 501;
-    if (!liabilityResponse.ok || (!documentsResponse.ok && documentsResponse.status !== 501) || !transactionsResponse.ok || !relationsResponse.ok || (!allDocumentsResponse.ok && allDocumentsResponse.status !== 501) || !assetsResponse.ok || !eventsResponse.ok) throw new Error(liability.error || documentsResult.error || transactions.error || relations.error || allDocumentsResult.error || assets.error || eventsResult?.error || 'Schuld laden mislukt');
+    if (!liabilityResponse.ok || (!documentsResponse.ok && documentsResponse.status !== 501) || !transactionsResponse.ok || !relationsResponse.ok || (!allDocumentsResponse.ok && allDocumentsResponse.status !== 501) || !casesResponse.ok || !eventsResponse.ok) throw new Error(liability.error || documentsResult.error || transactions.error || relations.error || allDocumentsResult.error || contracts.error || eventsResult?.error || 'Schuld laden mislukt');
     const events = validateDomainEvents(eventsResult);
     if (requestID !== liabilityDetailRequestID) return;
     const documents = documentsResponse.status === 501 ? [] : documentsResult;
     const allDocuments = allDocumentsResponse.status === 501 ? [] : allDocumentsResult;
     selectedLiabilityState = liability;
-    liabilityRelationAssetsState = assets;
-    liabilityRelationDocumentsState = allDocuments;
-    liabilityRelationTransactionsState = transactions;
+    liabilityContractsState = contractsForRelations(contracts, relations, 'liability', liability.id);
     document.querySelector('#liability-detail-name').textContent = liability.name;
     document.querySelector('#liability-overview').innerHTML = renderLiabilityOverview(liability);
+    document.querySelector('#liability-contract-list').innerHTML = renderLiabilityContracts(liabilityContractsState);
+    resetLiabilityContractForm();
     document.querySelector('#liability-document-list').innerHTML = renderLiabilityDocuments(documents);
     document.querySelector('#liability-document-status').textContent = documentsUnavailable ? 'Documentopslag is momenteel niet beschikbaar.' : '';
     renderLiabilityDocumentOptions(allDocuments, documents);
     document.querySelector('#liability-transaction-list').innerHTML = renderLiabilityTransactions(transactions);
-    document.querySelector('#liability-relations').innerHTML = renderLiabilityRelations(relations, liability.id);
     document.querySelector('#liability-timeline').innerHTML = renderDomainTimeline(events);
     document.querySelector('#liability-detail').classList.remove('hidden');
     document.querySelector('#liability-empty-state').classList.add('hidden');
     document.querySelector('#liability-form-panel').classList.add('hidden');
     document.querySelector('#liability-list').innerHTML = renderLiabilityList(liabilitiesState);
     switchLiabilityDetailSection(targetSection);
-    updateLiabilityRelationForm();
     await loadLiabilityTransactionCandidates();
   } catch (error) {
     if (requestID === liabilityDetailRequestID) window.alert(error.message);
@@ -2312,6 +2394,72 @@ async function loadLiabilityDetail(id, targetSection = 'overview') {
 
 function renderLiabilityOverview(liability) {
   return `<dl class="asset-overview-grid"><div><dt>Type</dt><dd>${escapeHtml(liabilityTypeLabel(liability.liabilityType))}</dd></div><div><dt>Status</dt><dd>${escapeHtml(liabilityStatusLabel(liability.status))}</dd></div><div><dt>Schuldeiser</dt><dd>${escapeHtml(liability.creditor || 'Niet vastgelegd')}</dd></div><div><dt>Looptijd</dt><dd>${escapeHtml(liability.startDate || '...')} t/m ${escapeHtml(liability.endDate || '...')}</dd></div><div><dt>Oorspronkelijk bedrag</dt><dd>${formatAssetValue(liability.originalAmountCents, liability.currency)}</dd></div><div><dt>Huidig saldo</dt><dd>${formatAssetValue(liability.currentBalanceCents, liability.currency)}</dd></div></dl><p class="asset-description">${escapeHtml(liability.description || 'Geen omschrijving.')}</p>`;
+}
+
+function renderLiabilityContracts(contracts) {
+  if (!contracts.length) return '<p>Nog geen contracten gekoppeld.</p>';
+  return `<ul>${contracts.map((item) => `<li><div><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(caseStatusLabel(item.status))}${item.startDate ? ` &middot; vanaf ${escapeHtml(item.startDate)}` : ''}${item.endDate ? ` t/m ${escapeHtml(item.endDate)}` : ''}</small>${item.termMonths ? `<span>Looptijd: ${escapeHtml(String(item.termMonths))} maanden</span>` : ''}${item.description ? `<p>${escapeHtml(item.description)}</p>` : ''}</div><div class="row-actions"><button type="button" class="secondary-button" data-liability-action="open-contract" data-contract-id="${item.id}">Openen</button><button type="button" class="icon-button" data-liability-action="edit-contract" data-contract-id="${item.id}" aria-label="Wijzig contract">&#9998;</button></div></li>`).join('')}</ul>`;
+}
+
+function resetLiabilityContractForm() {
+  const form = document.querySelector('#liability-contract-form');
+  form.reset();
+  form.elements.id.value = '';
+  form.elements.status.value = 'active';
+  form.querySelector('[data-liability-action="cancel-contract-edit"]').classList.add('hidden');
+}
+
+function editLiabilityContract(id) {
+  const item = liabilityContractsState.find((contract) => contract.id === id);
+  if (!item) return;
+  const form = document.querySelector('#liability-contract-form');
+  form.elements.id.value = item.id;
+  form.elements.title.value = item.title;
+  form.elements.description.value = item.description || '';
+  form.elements.startDate.value = item.startDate || '';
+  form.elements.endDate.value = item.endDate || '';
+  form.elements.termMonths.value = item.termMonths || '';
+  form.elements.status.value = item.status || 'active';
+  form.querySelector('[data-liability-action="cancel-contract-edit"]').classList.remove('hidden');
+  switchLiabilityDetailSection('contracts');
+}
+
+async function saveLiabilityContract(event) {
+  event.preventDefault();
+  if (!selectedLiabilityState) return;
+  const form = event.currentTarget;
+  const liabilityID = selectedLiabilityState.id;
+  const contractID = Number(form.elements.id.value);
+  const input = {
+    caseType: 'contract',
+    title: form.elements.title.value,
+    description: form.elements.description.value,
+    startDate: form.elements.startDate.value,
+    endDate: form.elements.endDate.value,
+    termMonths: Number(form.elements.termMonths.value),
+    status: form.elements.status.value,
+  };
+  try {
+    const response = await fetch(contractID ? `${apiBaseUrl}/api/v1/cases/${contractID}` : `${apiBaseUrl}/api/v1/cases`, { method: contractID ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+    const item = await response.json();
+    if (!response.ok) throw new Error(item.error || 'Contract opslaan mislukt');
+    if (!contractID) {
+      const relationResponse = await fetch(`${apiBaseUrl}/api/v1/liabilities/${liabilityID}/relations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ targetType: 'case', targetId: item.id, relationType: 'relates_to' }) });
+      if (!relationResponse.ok) throw new Error((await relationResponse.json()).error || 'Contract opgeslagen, maar koppelen aan schuld mislukt');
+    }
+    await loadLiabilityDetail(liabilityID, 'contracts');
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+async function openLiabilityContract(id) {
+  const form = document.querySelector('#case-filter-form');
+  form.elements.caseType.value = 'contract';
+  form.elements.status.value = '';
+  activateMainSection('cases');
+  await loadCases();
+  await loadCaseDetail(id);
 }
 
 function switchLiabilityDetailSection(target) {
@@ -2397,10 +2545,8 @@ async function loadLiabilityTransactionCandidates() {
     const transactions = await response.json();
     if (!response.ok) throw new Error(transactions.error || 'Transacties zoeken mislukt');
     if (selectedLiabilityState?.id !== liabilityID) return;
-    liabilityRelationTransactionsState = transactions;
     form.elements.transactionId.innerHTML = transactions.length ? `<option value="">Kies een transactie</option>${transactions.map((item) => `<option value="${item.id}">${escapeHtml(item.bookedOn)} · ${escapeHtml(item.description)} · ${formatAmount(item.amountCents)}</option>`).join('')}` : '<option value="">Geen transacties gevonden</option>';
     form.elements.transactionId.disabled = !transactions.length;
-    if (document.querySelector('#liability-relation-form').elements.targetType.value === 'transaction') updateLiabilityRelationForm();
   } catch (error) {
     if (selectedLiabilityState?.id === liabilityID) window.alert(error.message);
   }
@@ -2430,54 +2576,6 @@ async function unlinkLiabilityTransaction(transactionID) {
   await loadLiabilityDetail(liabilityID, 'transactions');
 }
 
-function updateLiabilityRelationForm() {
-  const form = document.querySelector('#liability-relation-form');
-  const targetType = form.elements.targetType.value;
-  const items = targetType === 'asset' ? liabilityRelationAssetsState : targetType === 'document' ? liabilityRelationDocumentsState : liabilityRelationTransactionsState;
-  form.elements.relationType.innerHTML = targetType === 'asset' ? '<option value="financed_by">Gefinancierd door</option>' : targetType === 'document' ? '<option value="evidence_for">Bewijs voor</option>' : '<option value="relates_to">Heeft betrekking op</option>';
-  form.elements.targetId.innerHTML = items.length ? `<option value="">Kies een object</option>${items.map((item) => {
-    if (targetType === 'asset') return `<option value="${item.id}">${escapeHtml(item.name)}</option>`;
-    if (targetType === 'document') return `<option value="${item.id}">${escapeHtml(item.originalFilename)}</option>`;
-    return `<option value="${item.id}">${escapeHtml(item.bookedOn)} &middot; ${escapeHtml(item.description)}</option>`;
-  }).join('')}` : '<option value="">Geen objecten beschikbaar</option>';
-  form.elements.targetId.disabled = !items.length;
-}
-
-function renderLiabilityRelations(relations, liabilityID) {
-  if (!relations.length) return '<p>Nog geen relaties vastgelegd.</p>';
-  return `<ul>${relations.map((relation) => {
-    const liabilityIsSource = relation.sourceType === 'liability' && relation.sourceId === liabilityID;
-    const relatedType = liabilityIsSource ? relation.targetType : relation.sourceType;
-    const relatedLabel = liabilityIsSource ? relation.targetLabel : relation.sourceLabel;
-    const period = relation.validFrom || relation.validTo ? `<small>${escapeHtml(relation.validFrom || '...')} t/m ${escapeHtml(relation.validTo || '...')}</small>` : '';
-    return `<li><div><strong>${escapeHtml(relatedLabel)}</strong><small>${escapeHtml(entityTypeLabel(relatedType))} &middot; ${escapeHtml(relationTypeLabel(relation.relationType))}</small>${period}${relation.notes ? `<p>${escapeHtml(relation.notes)}</p>` : ''}</div><button type="button" class="icon-button danger" data-liability-action="delete-relation" data-relation-id="${relation.id}" aria-label="Verwijder relatie">&#10005;</button></li>`;
-  }).join('')}</ul>`;
-}
-
-async function saveLiabilityRelation(event) {
-  event.preventDefault();
-  if (!selectedLiabilityState) return;
-  const form = event.currentTarget;
-  const targetID = Number(form.elements.targetId.value);
-  if (!targetID) return;
-  const liabilityID = selectedLiabilityState.id;
-  const input = { targetType: form.elements.targetType.value, targetId: targetID, relationType: form.elements.relationType.value, validFrom: form.elements.validFrom.value, validTo: form.elements.validTo.value, notes: form.elements.notes.value };
-  const response = await fetch(`${apiBaseUrl}/api/v1/liabilities/${liabilityID}/relations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
-  if (!response.ok) return window.alert((await response.json()).error || 'Relatie toevoegen mislukt');
-  form.elements.validFrom.value = '';
-  form.elements.validTo.value = '';
-  form.elements.notes.value = '';
-  await loadLiabilityDetail(liabilityID, 'relations');
-}
-
-async function deleteLiabilityRelation(relationID) {
-  if (!selectedLiabilityState || !window.confirm('Deze relatie verwijderen?')) return;
-  const liabilityID = selectedLiabilityState.id;
-  const response = await fetch(`${apiBaseUrl}/api/v1/liabilities/${liabilityID}/relations/${relationID}`, { method: 'DELETE' });
-  if (!response.ok) return window.alert((await response.json()).error || 'Relatie verwijderen mislukt');
-  await loadLiabilityDetail(liabilityID, 'relations');
-}
-
 function caseStatusOptions(selected = '') {
   return [['planned', 'Gepland'], ['active', 'Actief'], ['completed', 'Afgerond'], ['archived', 'Gearchiveerd']]
     .map(([value, label]) => `<option value="${value}" ${value === selected ? 'selected' : ''}>${label}</option>`).join('');
@@ -2494,11 +2592,11 @@ async function loadCases() {
   if (form.elements.caseType.value.trim()) params.set('type', form.elements.caseType.value.trim());
   if (form.elements.status.value) params.set('status', form.elements.status.value);
   const list = document.querySelector('#case-list');
-  list.innerHTML = '<p>Dossiers laden...</p>';
+  list.innerHTML = '<p>Contracten laden...</p>';
   try {
     const response = await fetch(`${apiBaseUrl}/api/v1/cases?${params}`);
     const cases = await response.json();
-    if (!response.ok) throw new Error(cases.error || 'Dossiers laden mislukt');
+    if (!response.ok) throw new Error(cases.error || 'Contracten laden mislukt');
     if (requestID !== caseListRequestID) return;
     casesState = cases;
     casesLoaded = true;
@@ -2509,8 +2607,14 @@ async function loadCases() {
 }
 
 function renderCaseList(cases) {
-  if (!cases.length) return '<p>Geen dossiers gevonden.</p>';
-  return `<ul>${cases.map((item) => `<li><button type="button" class="asset-list-button case-list-button ${selectedCaseState?.id === item.id ? 'active' : ''}" data-case-id="${item.id}"><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.mainCategoryId ? 'Hoofdcategorie' : item.caseType)} &middot; ${escapeHtml(caseStatusLabel(item.status))}</small></span>${item.startDate ? `<time datetime="${escapeHtml(item.startDate)}">${escapeHtml(item.startDate)}</time>` : ''}</button></li>`).join('')}</ul>`;
+  if (!cases.length) return '<p>Geen contracten gevonden.</p>';
+  return `<ul>${cases.map((item) => `<li><button type="button" class="asset-list-button case-list-button ${selectedCaseState?.id === item.id ? 'active' : ''}" data-case-id="${item.id}"><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(caseListTypeLabel(item))} &middot; ${escapeHtml(caseStatusLabel(item.status))}</small></span>${item.startDate ? `<time datetime="${escapeHtml(item.startDate)}">${escapeHtml(item.startDate)}</time>` : ''}</button></li>`).join('')}</ul>`;
+}
+
+function caseListTypeLabel(item) {
+  if (item.mainCategoryId) return 'Hoofdcategorie';
+  if (item.caseType === 'contract') return 'Contract';
+  return item.caseType;
 }
 
 async function handleCaseAction(event) {
@@ -2547,8 +2651,10 @@ function showCaseForm(item = null) {
   form.elements.description.value = item?.description || '';
   form.elements.startDate.value = item?.startDate || '';
   form.elements.endDate.value = item?.endDate || '';
+  form.elements.termMonths.value = item?.termMonths || '';
   form.elements.status.value = item?.status || 'active';
-  document.querySelector('#case-form-title').textContent = item ? 'Dossier wijzigen' : 'Nieuw dossier';
+  const isContract = item?.caseType === 'contract';
+  document.querySelector('#case-form-title').textContent = item?.id ? (isContract ? 'Contract wijzigen' : 'Object wijzigen') : 'Nieuw contract';
   document.querySelector('#case-form-panel').classList.remove('hidden');
   document.querySelector('#case-detail').classList.add('hidden');
   document.querySelector('#case-empty-state').classList.add('hidden');
@@ -2569,12 +2675,13 @@ async function saveCase(event) {
     description: form.elements.description.value,
     startDate: form.elements.startDate.value,
     endDate: form.elements.endDate.value,
+    termMonths: Number(form.elements.termMonths.value),
     status: form.elements.status.value,
   };
   try {
     const response = await fetch(id ? `${apiBaseUrl}/api/v1/cases/${id}` : `${apiBaseUrl}/api/v1/cases`, { method: id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
     const item = await response.json();
-    if (!response.ok) throw new Error(item.error || 'Dossier opslaan mislukt');
+    if (!response.ok) throw new Error(item.error || 'Contract opslaan mislukt');
     await loadCases();
     await loadCaseDetail(item.id);
   } catch (error) {
@@ -2594,7 +2701,7 @@ async function loadCaseDetail(id, targetSection = 'overview') {
     const [item, documentsResult, transactions, relations, allDocumentsResult, assets, liabilities, eventsResult] = await Promise.all([caseResponse.json(), documentsResponse.json(), transactionsResponse.json(), relationsResponse.json(), allDocumentsResponse.json(), assetsResponse.json(), liabilitiesResponse.json(), eventsResponse.json()]);
     const documentsUnavailable = documentsResponse.status === 501 || allDocumentsResponse.status === 501;
     if (!caseResponse.ok || (!documentsResponse.ok && documentsResponse.status !== 501) || !transactionsResponse.ok || !relationsResponse.ok || (!allDocumentsResponse.ok && allDocumentsResponse.status !== 501) || !assetsResponse.ok || !liabilitiesResponse.ok || !eventsResponse.ok) {
-      throw new Error(item.error || documentsResult.error || transactions.error || relations.error || allDocumentsResult.error || assets.error || liabilities.error || eventsResult?.error || 'Dossier laden mislukt');
+      throw new Error(item.error || documentsResult.error || transactions.error || relations.error || allDocumentsResult.error || assets.error || liabilities.error || eventsResult?.error || 'Contract laden mislukt');
     }
     const events = validateDomainEvents(eventsResult);
     if (requestID !== caseDetailRequestID) return;
@@ -2636,7 +2743,7 @@ function renderCaseCategorySummary(transactions) {
 }
 
 function renderCaseOverview(item) {
-  return `<dl class="asset-overview-grid"><div><dt>Type</dt><dd>${escapeHtml(item.mainCategoryId ? 'Hoofdcategorie' : item.caseType)}</dd></div><div><dt>Status</dt><dd>${escapeHtml(caseStatusLabel(item.status))}</dd></div><div><dt>Startdatum</dt><dd>${escapeHtml(item.startDate || 'Niet vastgelegd')}</dd></div><div><dt>Einddatum</dt><dd>${escapeHtml(item.endDate || 'Niet vastgelegd')}</dd></div></dl><p class="asset-description">${escapeHtml(item.mainCategoryId ? 'Dit dossier wordt automatisch beheerd vanuit de hoofdcategorie.' : item.description || 'Geen omschrijving.')}</p>`;
+  return `<dl class="asset-overview-grid"><div><dt>Type</dt><dd>${escapeHtml(item.mainCategoryId ? 'Hoofdcategorie' : item.caseType)}</dd></div><div><dt>Status</dt><dd>${escapeHtml(caseStatusLabel(item.status))}</dd></div><div><dt>Startdatum</dt><dd>${escapeHtml(item.startDate || 'Niet vastgelegd')}</dd></div><div><dt>Einddatum</dt><dd>${escapeHtml(item.endDate || 'Niet vastgelegd')}</dd></div><div><dt>Looptijd</dt><dd>${escapeHtml(item.termMonths ? `${item.termMonths} maanden` : 'Niet vastgelegd')}</dd></div></dl><p class="asset-description">${escapeHtml(item.mainCategoryId ? 'Dit object wordt automatisch beheerd vanuit de hoofdcategorie.' : item.description || 'Geen omschrijving.')}</p>`;
 }
 
 function switchCaseDetailSection(target) {
@@ -2645,10 +2752,10 @@ function switchCaseDetailSection(target) {
 }
 
 async function deleteSelectedCase() {
-  if (!selectedCaseState || !window.confirm(`Dossier "${selectedCaseState.title}" verwijderen?`)) return;
+  if (!selectedCaseState || !window.confirm(`Contract "${selectedCaseState.title}" verwijderen?`)) return;
   const caseID = selectedCaseState.id;
   const response = await fetch(`${apiBaseUrl}/api/v1/cases/${caseID}`, { method: 'DELETE' });
-  if (!response.ok) return window.alert((await response.json()).error || 'Dossier verwijderen mislukt');
+  if (!response.ok) return window.alert((await response.json()).error || 'Contract verwijderen mislukt');
   if (selectedCaseState?.id === caseID) {
     selectedCaseState = null;
     caseDetailRequestID += 1;
@@ -2835,7 +2942,7 @@ function domainEventTypeLabel(value) {
     transaction_linked: 'Transactie gekoppeld', transaction_unlinked: 'Transactie ontkoppeld',
     relation_linked: 'Relatie gekoppeld', relation_unlinked: 'Relatie ontkoppeld',
     liability_created: 'Schuld aangemaakt', liability_updated: 'Schuld gewijzigd', liability_repaid: 'Schuld afgelost',
-    case_created: 'Dossier aangemaakt', case_updated: 'Dossier gewijzigd', case_completed: 'Dossier afgerond',
+    case_created: 'Contract aangemaakt', case_updated: 'Contract gewijzigd', case_completed: 'Contract afgerond',
   };
   return Object.hasOwn(labels, value) ? labels[value] : value;
 }
@@ -3665,7 +3772,7 @@ async function renameMainCategory(id) {
 
 async function deleteMainCategory(id) {
   const current = mainCategoriesState.find((category) => category.id === id);
-  if (!window.confirm(`Hoofdcategorie "${current?.name || ''}" en het gekoppelde dossier verwijderen? Dit kan alleen als er geen subcategorieen of dossierkoppelingen zijn.`)) {
+  if (!window.confirm(`Hoofdcategorie "${current?.name || ''}" en de gekoppelde registratie verwijderen? Dit kan alleen als er geen subcategorieen of koppelingen zijn.`)) {
     return;
   }
 

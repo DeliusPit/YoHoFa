@@ -82,6 +82,12 @@ h1 {
   gap: 16px;
 }
 
+.dashboard-side-column {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
 .dashboard-panel,
 .category-panel,
 .transaction-panel {
@@ -124,7 +130,8 @@ h1 {
   font-size: 1.7rem;
 }
 
-#dashboard-net-worth {
+#dashboard-net-worth,
+#dashboard-contract-count {
   min-width: 0;
   color: #5f5a50;
   font-size: 0.9rem;
@@ -461,6 +468,120 @@ h1 {
 
 .dashboard-wealth-summary button.dashboard-wealth-card:hover {
   background: #f6f2ea;
+}
+
+.dashboard-contracts {
+  margin-top: 14px;
+}
+
+.contract-timeline {
+  position: relative;
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0 0 0 18px;
+  list-style: none;
+}
+
+.contract-timeline::before {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 5px;
+  width: 2px;
+  border-radius: 999px;
+  background: linear-gradient(#14213d, #fca311, #ddd3c2);
+  content: '';
+}
+
+.contract-timeline li {
+  position: relative;
+  min-width: 0;
+}
+
+.contract-timeline-dot {
+  position: absolute;
+  top: 8px;
+  left: -17px;
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  border: 2px solid #fffaf0;
+  border-radius: 999px;
+  background: #fca311;
+  box-shadow: 0 0 0 1px #d9c8ad;
+}
+
+.contract-timeline-today {
+  padding: 1px 0 4px;
+  color: #5f5a50;
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+.contract-timeline-today .contract-timeline-dot {
+  background: #14213d;
+}
+
+.contract-timeline-today strong,
+.contract-timeline-today time {
+  display: inline;
+  font-size: 0.68rem;
+}
+
+.contract-timeline-today strong {
+  margin-right: 6px;
+  color: #14213d;
+}
+
+.contract-timeline-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid #eadfce;
+  border-radius: 12px;
+  background: #fffdf8;
+  color: #5f5a50;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.contract-timeline-card:hover {
+  border-color: #d9c8ad;
+  background: #f6f2ea;
+}
+
+.contract-timeline-card strong {
+  display: block;
+  color: #14213d;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.contract-timeline-card small {
+  display: block;
+  margin-top: 1px;
+  font-size: 0.55rem;
+  font-weight: 500;
+}
+
+.contract-timeline-card time {
+  color: #14213d;
+  font-size: 0.58rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.contract-timeline-item.overdue .contract-timeline-dot {
+  background: #9f2d20;
+}
+
+.contract-timeline-item.overdue .contract-timeline-card time {
+  color: #9f2d20;
 }
 
 .dashboard-wealth-card > span:first-child {

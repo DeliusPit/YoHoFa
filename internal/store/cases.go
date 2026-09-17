@@ -23,6 +23,7 @@ type Case struct {
 	Description    string `json:"description,omitempty"`
 	StartDate      string `json:"startDate,omitempty"`
 	EndDate        string `json:"endDate,omitempty"`
+	TermMonths     int    `json:"termMonths,omitempty"`
 	Status         string `json:"status"`
 	CreatedAt      string `json:"createdAt"`
 	UpdatedAt      string `json:"updatedAt"`
@@ -34,6 +35,7 @@ type SaveCase struct {
 	Description string `json:"description"`
 	StartDate   string `json:"startDate"`
 	EndDate     string `json:"endDate"`
+	TermMonths  int    `json:"termMonths"`
 	Status      string `json:"status"`
 }
 
@@ -58,7 +60,7 @@ func (s *Postgres) Cases(ctx context.Context, filter CaseFilter) ([]Case, error)
 	}
 	rows, err := s.pool.Query(ctx, `
 		select id, household_id, coalesce(main_category_id, 0), case_type, title, coalesce(description, ''),
-			coalesce(to_char(start_date, 'YYYY-MM-DD'), ''), coalesce(to_char(end_date, 'YYYY-MM-DD'), ''),
+			coalesce(to_char(start_date, 'YYYY-MM-DD'), ''), coalesce(to_char(end_date, 'YYYY-MM-DD'), ''), coalesce(term_months, 0),
 			status, created_at::text, updated_at::text
 		from cases
 		where ($1::text = '' or case_type = $1)
@@ -84,7 +86,7 @@ func (s *Postgres) Case(ctx context.Context, id int64) (Case, error) {
 	var item Case
 	err := scanCase(s.pool.QueryRow(ctx, `
 		select id, household_id, coalesce(main_category_id, 0), case_type, title, coalesce(description, ''),
-			coalesce(to_char(start_date, 'YYYY-MM-DD'), ''), coalesce(to_char(end_date, 'YYYY-MM-DD'), ''),
+			coalesce(to_char(start_date, 'YYYY-MM-DD'), ''), coalesce(to_char(end_date, 'YYYY-MM-DD'), ''), coalesce(term_months, 0),
 			status, created_at::text, updated_at::text
 		from cases where id = $1
 	`, id), &item)
@@ -106,12 +108,12 @@ func (s *Postgres) CreateCase(ctx context.Context, input SaveCase) (Case, error)
 	defer tx.Rollback(ctx)
 	var item Case
 	err = scanCase(tx.QueryRow(ctx, `
-		insert into cases (household_id, case_type, title, description, start_date, end_date, status)
-		values ((select id from households order by id limit 1), $1, $2, $3, $4, $5, $6)
+		insert into cases (household_id, case_type, title, description, start_date, end_date, term_months, status)
+		values ((select id from households order by id limit 1), $1, $2, $3, $4, $5, $6, $7)
 		returning id, household_id, coalesce(main_category_id, 0), case_type, title, coalesce(description, ''),
-			coalesce(to_char(start_date, 'YYYY-MM-DD'), ''), coalesce(to_char(end_date, 'YYYY-MM-DD'), ''),
+			coalesce(to_char(start_date, 'YYYY-MM-DD'), ''), coalesce(to_char(end_date, 'YYYY-MM-DD'), ''), coalesce(term_months, 0),
 			status, created_at::text, updated_at::text
-	`, input.CaseType, input.Title, input.Description, startDate, endDate, input.Status), &item)
+	`, input.CaseType, input.Title, input.Description, startDate, endDate, nullablePositiveInt(input.TermMonths), input.Status), &item)
 	if err != nil {
 		return Case{}, err
 	}
@@ -147,12 +149,12 @@ func (s *Postgres) UpdateCase(ctx context.Context, id int64, input SaveCase) (Ca
 	var item Case
 	err = scanCase(tx.QueryRow(ctx, `
 		update cases
-		set case_type = $1, title = $2, description = $3, start_date = $4, end_date = $5, status = $6, updated_at = now()
-		where id = $7
+		set case_type = $1, title = $2, description = $3, start_date = $4, end_date = $5, term_months = $6, status = $7, updated_at = now()
+		where id = $8
 		returning id, household_id, coalesce(main_category_id, 0), case_type, title, coalesce(description, ''),
-			coalesce(to_char(start_date, 'YYYY-MM-DD'), ''), coalesce(to_char(end_date, 'YYYY-MM-DD'), ''),
+			coalesce(to_char(start_date, 'YYYY-MM-DD'), ''), coalesce(to_char(end_date, 'YYYY-MM-DD'), ''), coalesce(term_months, 0),
 			status, created_at::text, updated_at::text
-	`, input.CaseType, input.Title, input.Description, startDate, endDate, input.Status, id), &item)
+	`, input.CaseType, input.Title, input.Description, startDate, endDate, nullablePositiveInt(input.TermMonths), input.Status, id), &item)
 	if err == pgx.ErrNoRows {
 		return Case{}, fmt.Errorf("case not found")
 	} else if err != nil {
@@ -218,7 +220,7 @@ type caseScanner interface {
 
 func scanCase(scanner caseScanner, item *Case) error {
 	return scanner.Scan(&item.ID, &item.HouseholdID, &item.MainCategoryID, &item.CaseType, &item.Title, &item.Description,
-		&item.StartDate, &item.EndDate, &item.Status, &item.CreatedAt, &item.UpdatedAt)
+		&item.StartDate, &item.EndDate, &item.TermMonths, &item.Status, &item.CreatedAt, &item.UpdatedAt)
 }
 
 func normalizeCaseInput(input SaveCase) (SaveCase, any, any, error) {
@@ -228,6 +230,9 @@ func normalizeCaseInput(input SaveCase) (SaveCase, any, any, error) {
 	input.StartDate = strings.TrimSpace(input.StartDate)
 	input.EndDate = strings.TrimSpace(input.EndDate)
 	input.Status = strings.TrimSpace(input.Status)
+	if input.TermMonths < 0 {
+		return SaveCase{}, nil, nil, fmt.Errorf("invalid term months")
+	}
 	if input.CaseType == "" {
 		return SaveCase{}, nil, nil, fmt.Errorf("case type is required")
 	}
@@ -252,6 +257,13 @@ func normalizeCaseInput(input SaveCase) (SaveCase, any, any, error) {
 		return SaveCase{}, nil, nil, fmt.Errorf("end date cannot be before start date")
 	}
 	return input, startDate, endDate, nil
+}
+
+func nullablePositiveInt(value int) any {
+	if value == 0 {
+		return nil
+	}
+	return value
 }
 
 func validCaseStatus(status string) bool {

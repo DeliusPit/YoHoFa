@@ -329,9 +329,12 @@ func TestSQLiteLiabilityCaseLifecycleAndEventCleanup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	caseItem, err := store.CreateCase(ctx, SaveCase{CaseType: "verbouwing", Title: "Keuken", StartDate: "2026-01-01"})
+	caseItem, err := store.CreateCase(ctx, SaveCase{CaseType: "contract", Title: "Keuken", StartDate: "2026-01-01", TermMonths: 24})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if caseItem.TermMonths != 24 {
+		t.Fatalf("case contract fields were not saved: %+v", caseItem)
 	}
 	relation, err := store.CreateEntityRelation(ctx, SaveEntityRelation{SourceType: ObjectTypeLiability, SourceID: liability.ID, TargetType: ObjectTypeCase, TargetID: caseItem.ID, RelationType: RelationTypeRelatesTo})
 	if err != nil {
@@ -350,8 +353,8 @@ func TestSQLiteLiabilityCaseLifecycleAndEventCleanup(t *testing.T) {
 	if err != nil || liability.Status != "repaid" {
 		t.Fatalf("liability=%+v err=%v", liability, err)
 	}
-	caseItem, err = store.UpdateCase(ctx, caseItem.ID, SaveCase{CaseType: "verbouwing", Title: "Keuken", Status: "completed"})
-	if err != nil || caseItem.Status != "completed" {
+	caseItem, err = store.UpdateCase(ctx, caseItem.ID, SaveCase{CaseType: "contract", Title: "Keuken", TermMonths: 36, Status: "completed"})
+	if err != nil || caseItem.Status != "completed" || caseItem.TermMonths != 36 {
 		t.Fatalf("case=%+v err=%v", caseItem, err)
 	}
 	if err := store.DeleteLiability(ctx, liability.ID); err != nil {

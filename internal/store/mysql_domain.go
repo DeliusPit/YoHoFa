@@ -10,7 +10,7 @@ import (
 
 const mysqlAssetColumns = `id,household_id,asset_type,name,coalesce(description,''),status,coalesce(date_format(acquired_at,'%Y-%m-%d'),''),coalesce(date_format(disposed_at,'%Y-%m-%d'),''),purchase_value,current_value,currency,date_format(created_at,'%Y-%m-%d %H:%i:%s.%f+00'),date_format(updated_at,'%Y-%m-%d %H:%i:%s.%f+00')`
 const mysqlLiabilityColumns = `id,household_id,liability_type,name,coalesce(description,''),coalesce(creditor,''),coalesce(date_format(start_date,'%Y-%m-%d'),''),coalesce(date_format(end_date,'%Y-%m-%d'),''),original_amount,current_balance,currency,status,date_format(created_at,'%Y-%m-%d %H:%i:%s.%f+00'),date_format(updated_at,'%Y-%m-%d %H:%i:%s.%f+00')`
-const mysqlCaseColumns = `id,household_id,coalesce(main_category_id,0),case_type,title,coalesce(description,''),coalesce(date_format(start_date,'%Y-%m-%d'),''),coalesce(date_format(end_date,'%Y-%m-%d'),''),status,date_format(created_at,'%Y-%m-%d %H:%i:%s.%f+00'),date_format(updated_at,'%Y-%m-%d %H:%i:%s.%f+00')`
+const mysqlCaseColumns = `id,household_id,coalesce(main_category_id,0),case_type,title,coalesce(description,''),coalesce(date_format(start_date,'%Y-%m-%d'),''),coalesce(date_format(end_date,'%Y-%m-%d'),''),coalesce(term_months,0),status,date_format(created_at,'%Y-%m-%d %H:%i:%s.%f+00'),date_format(updated_at,'%Y-%m-%d %H:%i:%s.%f+00')`
 const mysqlValuationColumns = `id,asset_id,date_format(valuation_date,'%Y-%m-%d'),value,valuation_type,coalesce(source,''),coalesce(notes,''),date_format(created_at,'%Y-%m-%d %H:%i:%s.%f+00')`
 const mysqlDocumentColumns = `id,original_filename,mime_type,size_bytes,sha256,object_key,coalesce(date_format(document_date,'%Y-%m-%d'),''),coalesce(description,''),date_format(created_at,'%Y-%m-%d %H:%i:%s.%f+00')`
 
@@ -338,7 +338,7 @@ func (s *MySQL) CreateCase(ctx context.Context, input SaveCase) (Case, error) {
 		return Case{}, err
 	}
 	defer tx.Rollback()
-	r, err := tx.ExecContext(ctx, `insert into cases(household_id,case_type,title,description,start_date,end_date,status) values ((select id from households order by id limit 1),?,?,?,?,?,?)`, input.CaseType, input.Title, input.Description, start, end, input.Status)
+	r, err := tx.ExecContext(ctx, `insert into cases(household_id,case_type,title,description,start_date,end_date,term_months,status) values ((select id from households order by id limit 1),?,?,?,?,?,?,?)`, input.CaseType, input.Title, input.Description, start, end, nullablePositiveInt(input.TermMonths), input.Status)
 	if err != nil {
 		return Case{}, err
 	}
@@ -378,7 +378,7 @@ func (s *MySQL) UpdateCase(ctx context.Context, id int64, input SaveCase) (Case,
 	if mainCategoryID != 0 {
 		return Case{}, fmt.Errorf("case is managed by a main category")
 	}
-	_, err = tx.ExecContext(ctx, `update cases set case_type=?,title=?,description=?,start_date=?,end_date=?,status=?,updated_at=utc_timestamp(6) where id=?`, input.CaseType, input.Title, input.Description, start, end, input.Status, id)
+	_, err = tx.ExecContext(ctx, `update cases set case_type=?,title=?,description=?,start_date=?,end_date=?,term_months=?,status=?,updated_at=utc_timestamp(6) where id=?`, input.CaseType, input.Title, input.Description, start, end, nullablePositiveInt(input.TermMonths), input.Status, id)
 	if err != nil {
 		return Case{}, err
 	}

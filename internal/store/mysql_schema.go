@@ -184,4 +184,11 @@ var mysqlMigrations = []struct {
 			`alter table cases add unique key cases_main_category_unique_idx (main_category_id)`,
 		},
 	},
+	{
+		version: "003_case_contract_fields",
+		statements: []string{
+			`alter table cases add column term_months int null after end_date`,
+			`alter table cases add constraint cases_term_months_check check (term_months is null or term_months > 0)`,
+		},
+	},
 }

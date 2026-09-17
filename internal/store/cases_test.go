@@ -14,11 +14,12 @@ func TestNormalizeCaseInput(t *testing.T) {
 		Description: " supporting records ",
 		StartDate:   "2025-01-01",
 		EndDate:     "2025-12-31",
+		TermMonths:  12,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if input.CaseType != "tax" || input.Title != "2025 return" || input.Description != "supporting records" || input.Status != "active" {
+	if input.CaseType != "tax" || input.Title != "2025 return" || input.Description != "supporting records" || input.TermMonths != 12 || input.Status != "active" {
 		t.Fatalf("unexpected normalized case: %+v", input)
 	}
 }
@@ -30,6 +31,7 @@ func TestNormalizeCaseInputRejectsInvalidValues(t *testing.T) {
 		{CaseType: "tax", Title: "Return", Status: "open"},
 		{CaseType: "tax", Title: "Return", StartDate: "2025-02-01", EndDate: "2025-01-01"},
 		{CaseType: "tax", Title: "Return", StartDate: "01-01-2025"},
+		{CaseType: "tax", Title: "Return", TermMonths: -1},
 	}
 	for _, input := range tests {
 		if _, _, _, err := normalizeCaseInput(input); err == nil {
@@ -101,9 +103,12 @@ func TestPostgresCaseLifecycle(t *testing.T) {
 	}
 	defer db.Close()
 
-	item, err := db.CreateCase(ctx, SaveCase{CaseType: "tax", Title: "Test case"})
+	item, err := db.CreateCase(ctx, SaveCase{CaseType: "contract", Title: "Test case", TermMonths: 12})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if item.TermMonths != 12 {
+		t.Fatalf("contract fields were not saved: %+v", item)
 	}
 	asset, err := db.CreateAsset(ctx, SaveAsset{AssetType: "other", Name: "Case test asset"})
 	if err != nil {

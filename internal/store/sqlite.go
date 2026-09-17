@@ -755,6 +755,9 @@ func (s *SQLite) ensureSchema(ctx context.Context, db sqliteInitializer) error {
 	if err := s.ensureColumn(ctx, db, "cases", "main_category_id", "integer references main_categories(id) on delete cascade"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn(ctx, db, "cases", "term_months", "integer check (term_months is null or term_months > 0)"); err != nil {
+		return err
+	}
 	if _, err := db.ExecContext(ctx, sqliteUpgradeSchema); err != nil {
 		return err
 	}
@@ -1067,12 +1070,13 @@ create index if not exists liabilities_household_type_status_idx on liabilities(
 create table if not exists cases (
     id integer primary key,
     household_id integer not null default 1 references households(id) on delete cascade,
-    main_category_id integer references main_categories(id) on delete cascade,
-    case_type text not null check (trim(case_type) <> ''),
+	main_category_id integer references main_categories(id) on delete cascade,
+	case_type text not null check (trim(case_type) <> ''),
     title text not null check (trim(title) <> ''),
     description text,
-    start_date text check (start_date is null or (length(start_date) = 10 and strftime('%Y-%m-%d', start_date) = start_date)),
-    end_date text check (end_date is null or (length(end_date) = 10 and strftime('%Y-%m-%d', end_date) = end_date)),
+	start_date text check (start_date is null or (length(start_date) = 10 and strftime('%Y-%m-%d', start_date) = start_date)),
+	end_date text check (end_date is null or (length(end_date) = 10 and strftime('%Y-%m-%d', end_date) = end_date)),
+	term_months integer check (term_months is null or term_months > 0),
     status text not null default 'active' check (status in ('planned', 'active', 'completed', 'archived')),
     created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
