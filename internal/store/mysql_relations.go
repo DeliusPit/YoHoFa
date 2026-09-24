@@ -173,6 +173,8 @@ func mysqlValidateAndLockEntity(ctx context.Context, tx *sql.Tx, typ string, id 
 		table = "documents"
 	case ObjectTypeCase:
 		table = "cases"
+	case ObjectTypeReservation:
+		table = "reservations"
 	default:
 		return fmt.Errorf("unsupported entity type")
 	}
@@ -237,7 +239,7 @@ func (s *MySQL) appendRelationDomainEvents(ctx context.Context, tx *sql.Tx, v En
 }
 
 func (s *MySQL) objectTransactions(ctx context.Context, typ string, id int64) ([]Transaction, error) {
-	rows, err := s.db.QueryContext(ctx, `select transactions.id,transactions.account_id,coalesce(transactions.category_id,0),date_format(transactions.booked_on,'%Y-%m-%d'),transactions.description,coalesce(transactions.counterparty,''),coalesce(transactions.counterparty_iban,''),transactions.amount_cents,coalesce(transactions.external_reference,''),coalesce(transactions.import_fingerprint,''),transactions.hidden,(select count(distinct source_id) from entity_relations where source_type='document' and target_type='transaction' and target_id=transactions.id and relation_type='evidence_for') from transactions where exists(select 1 from entity_relations where target_type='transaction' and target_id=transactions.id and source_type=? and source_id=? and relation_type='relates_to') order by transactions.booked_on desc,transactions.id desc`, typ, id)
+	rows, err := s.db.QueryContext(ctx, `select transactions.id,transactions.account_id,coalesce(transactions.category_id,0),date_format(transactions.booked_on,'%Y-%m-%d'),transactions.description,coalesce(parties.name,transactions.counterparty_name_raw,transactions.counterparty,''),coalesce(transactions.counterparty_iban_raw,transactions.counterparty_iban,''),transactions.amount_cents,coalesce(transactions.external_reference,''),coalesce(transactions.import_fingerprint,''),transactions.hidden,(select count(distinct source_id) from entity_relations where source_type='document' and target_type='transaction' and target_id=transactions.id and relation_type='evidence_for') from transactions left join parties on parties.id=transactions.counterparty_party_id where exists(select 1 from entity_relations where target_type='transaction' and target_id=transactions.id and source_type=? and source_id=? and relation_type='relates_to') order by transactions.booked_on desc,transactions.id desc`, typ, id)
 	if err != nil {
 		return nil, err
 	}
@@ -295,6 +297,8 @@ func (s *MySQL) entityLabel(ctx context.Context, typ string, id int64) (string, 
 		query = `select original_filename from documents where id=?`
 	case ObjectTypeCase:
 		query = `select title from cases where id=?`
+	case ObjectTypeReservation:
+		query = `select name from reservations where id=?`
 	default:
 		return fmt.Sprintf("%s #%d", typ, id), nil
 	}

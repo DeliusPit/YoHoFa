@@ -31,7 +31,7 @@ func (s *SQLite) CreateDocument(ctx context.Context, input CreateDocument) (Docu
 
 func (s *SQLite) Document(ctx context.Context, id int64) (Document, error) {
 	var item Document
-	err := scanSQLiteDocument(s.db.QueryRowContext(ctx, sqliteDocumentSelect+` where id = ?`, id), &item)
+	err := scanSQLiteDocument(s.db.QueryRowContext(ctx, sqliteDocumentSelect+` where documents.id = ?`, id), &item)
 	if err == sql.ErrNoRows {
 		return Document{}, fmt.Errorf("document not found")
 	}
@@ -39,7 +39,7 @@ func (s *SQLite) Document(ctx context.Context, id int64) (Document, error) {
 }
 
 func (s *SQLite) Documents(ctx context.Context) ([]Document, error) {
-	return s.sqliteDocumentsQuery(ctx, sqliteDocumentSelect+` order by created_at desc, id desc`)
+	return s.sqliteDocumentsQuery(ctx, sqliteDocumentSelect+` order by documents.created_at desc, documents.id desc`)
 }
 
 func (s *SQLite) LinkDocument(ctx context.Context, documentID int64, objectType string, objectID int64) error {
@@ -63,7 +63,7 @@ func (s *SQLite) DocumentsForObject(ctx context.Context, objectType string, obje
 			where source_type = 'document' and source_id = documents.id
 			and target_type = ? and target_id = ? and relation_type = 'evidence_for'
 		)
-		order by created_at desc, id desc
+		order by documents.created_at desc, documents.id desc
 	`, objectType, objectID)
 }
 
@@ -103,14 +103,35 @@ func (s *SQLite) UnlinkDocument(ctx context.Context, documentID int64, objectTyp
 	return tx.Commit()
 }
 
+func (s *SQLite) UpdateDocumentTranslation(ctx context.Context, id int64, status string, text string) error {
+	result, err := s.db.ExecContext(ctx, `update documents set translation_status = ?, translation_text = ? where id = ?`, status, text, id)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return fmt.Errorf("document not found")
+	}
+	_, err = s.db.ExecContext(ctx, `
+		insert into document_analyses (document_id, analysis_type, status, language, content_text)
+		values (?, 'translation', ?, 'nl', ?)
+		on conflict(document_id, analysis_type) do update set status = excluded.status, language = excluded.language, content_text = excluded.content_text, updated_at = current_timestamp
+	`, id, status, text)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 const sqliteDocumentSelect = `
-	select id, original_filename, mime_type, size_bytes, sha256, object_key,
-		coalesce(document_date, ''), coalesce(description, ''), created_at
-	from documents`
+	select documents.id, documents.original_filename, documents.mime_type, documents.size_bytes, documents.sha256, documents.object_key,
+		coalesce(documents.document_date, ''), coalesce(documents.description, ''),
+		coalesce(document_analyses.content_text, documents.translation_text, ''), coalesce(document_analyses.status, documents.translation_status), documents.created_at
+	from documents
+	left join document_analyses on document_analyses.document_id = documents.id and document_analyses.analysis_type = 'translation'`
 
 func scanSQLiteDocument(scanner interface{ Scan(...any) error }, item *Document) error {
 	return scanner.Scan(&item.ID, &item.OriginalFilename, &item.MIMEType, &item.SizeBytes, &item.SHA256, &item.ObjectKey,
-		&item.DocumentDate, &item.Description, &item.CreatedAt)
+		&item.DocumentDate, &item.Description, &item.TranslationText, &item.TranslationStatus, &item.CreatedAt)
 }
 
 func (s *SQLite) sqliteDocumentsQuery(ctx context.Context, query string, args ...any) ([]Document, error) {

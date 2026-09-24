@@ -3,14 +3,15 @@ package httpserver
 import (
 	"net/http"
 
-	"geldzaken/internal/store"
+	"hohoho/internal/store"
 )
 
 func registerDomainEventRoutes(mux *http.ServeMux, deps Dependencies) {
 	for path, entityType := range map[string]string{
-		"assets":      store.ObjectTypeAsset,
-		"liabilities": store.ObjectTypeLiability,
-		"cases":       store.ObjectTypeCase,
+		"assets":       store.ObjectTypeAsset,
+		"liabilities":  store.ObjectTypeLiability,
+		"reservations": store.ObjectTypeReservation,
+		"cases":        store.ObjectTypeCase,
 	} {
 		mux.HandleFunc("GET /api/v1/"+path+"/{id}/events", func(w http.ResponseWriter, r *http.Request) {
 			id, err := pathID(r)
@@ -34,5 +35,6 @@ func registerUnavailableDomainEventRoutes(mux *http.ServeMux) {
 	}
 	mux.HandleFunc("GET /api/v1/assets/{id}/events", unavailable)
 	mux.HandleFunc("GET /api/v1/liabilities/{id}/events", unavailable)
+	mux.HandleFunc("GET /api/v1/reservations/{id}/events", unavailable)
 	mux.HandleFunc("GET /api/v1/cases/{id}/events", unavailable)
 }

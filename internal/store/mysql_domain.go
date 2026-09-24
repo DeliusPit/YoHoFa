@@ -9,10 +9,12 @@ import (
 )
 
 const mysqlAssetColumns = `id,household_id,asset_type,name,coalesce(description,''),status,coalesce(date_format(acquired_at,'%Y-%m-%d'),''),coalesce(date_format(disposed_at,'%Y-%m-%d'),''),purchase_value,current_value,currency,date_format(created_at,'%Y-%m-%d %H:%i:%s.%f+00'),date_format(updated_at,'%Y-%m-%d %H:%i:%s.%f+00')`
-const mysqlLiabilityColumns = `id,household_id,liability_type,name,coalesce(description,''),coalesce(creditor,''),coalesce(date_format(start_date,'%Y-%m-%d'),''),coalesce(date_format(end_date,'%Y-%m-%d'),''),original_amount,current_balance,currency,status,date_format(created_at,'%Y-%m-%d %H:%i:%s.%f+00'),date_format(updated_at,'%Y-%m-%d %H:%i:%s.%f+00')`
+const mysqlLiabilityColumns = `liabilities.id,liabilities.household_id,liability_type,liabilities.name,coalesce(description,''),coalesce(parties.name,creditor,''),coalesce(date_format(start_date,'%Y-%m-%d'),''),coalesce(date_format(end_date,'%Y-%m-%d'),''),original_amount,current_balance,currency,status,date_format(liabilities.created_at,'%Y-%m-%d %H:%i:%s.%f+00'),date_format(liabilities.updated_at,'%Y-%m-%d %H:%i:%s.%f+00')`
+const mysqlLiabilityJoin = ` left join parties on parties.id=liabilities.creditor_party_id`
 const mysqlCaseColumns = `id,household_id,coalesce(main_category_id,0),case_type,title,coalesce(description,''),coalesce(date_format(start_date,'%Y-%m-%d'),''),coalesce(date_format(end_date,'%Y-%m-%d'),''),coalesce(term_months,0),status,date_format(created_at,'%Y-%m-%d %H:%i:%s.%f+00'),date_format(updated_at,'%Y-%m-%d %H:%i:%s.%f+00')`
 const mysqlValuationColumns = `id,asset_id,date_format(valuation_date,'%Y-%m-%d'),value,valuation_type,coalesce(source,''),coalesce(notes,''),date_format(created_at,'%Y-%m-%d %H:%i:%s.%f+00')`
-const mysqlDocumentColumns = `id,original_filename,mime_type,size_bytes,sha256,object_key,coalesce(date_format(document_date,'%Y-%m-%d'),''),coalesce(description,''),date_format(created_at,'%Y-%m-%d %H:%i:%s.%f+00')`
+const mysqlDocumentColumns = `documents.id,documents.original_filename,documents.mime_type,documents.size_bytes,documents.sha256,documents.object_key,coalesce(date_format(documents.document_date,'%Y-%m-%d'),''),coalesce(documents.description,''),coalesce(document_analyses.content_text,documents.translation_text,''),coalesce(document_analyses.status,documents.translation_status),date_format(documents.created_at,'%Y-%m-%d %H:%i:%s.%f+00')`
+const mysqlDocumentJoin = ` left join document_analyses on document_analyses.document_id=documents.id and document_analyses.analysis_type='translation'`
 
 func (s *MySQL) CreateDocument(ctx context.Context, input CreateDocument) (Document, error) {
 	var date any
@@ -35,14 +37,14 @@ func (s *MySQL) CreateDocument(ctx context.Context, input CreateDocument) (Docum
 }
 func (s *MySQL) Document(ctx context.Context, id int64) (Document, error) {
 	var v Document
-	err := s.db.QueryRowContext(ctx, `select `+mysqlDocumentColumns+` from documents where id=?`, id).Scan(&v.ID, &v.OriginalFilename, &v.MIMEType, &v.SizeBytes, &v.SHA256, &v.ObjectKey, &v.DocumentDate, &v.Description, &v.CreatedAt)
+	err := s.db.QueryRowContext(ctx, `select `+mysqlDocumentColumns+` from documents`+mysqlDocumentJoin+` where documents.id=?`, id).Scan(&v.ID, &v.OriginalFilename, &v.MIMEType, &v.SizeBytes, &v.SHA256, &v.ObjectKey, &v.DocumentDate, &v.Description, &v.TranslationText, &v.TranslationStatus, &v.CreatedAt)
 	if err == sql.ErrNoRows {
 		return Document{}, fmt.Errorf("document not found")
 	}
 	return v, err
 }
 func (s *MySQL) Documents(ctx context.Context) ([]Document, error) {
-	return s.documentsQuery(ctx, `select `+mysqlDocumentColumns+` from documents order by created_at desc,id desc`)
+	return s.documentsQuery(ctx, `select `+mysqlDocumentColumns+` from documents`+mysqlDocumentJoin+` order by documents.created_at desc,documents.id desc`)
 }
 func (s *MySQL) documentsQuery(ctx context.Context, q string, args ...any) ([]Document, error) {
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -53,12 +55,20 @@ func (s *MySQL) documentsQuery(ctx context.Context, q string, args ...any) ([]Do
 	items := []Document{}
 	for rows.Next() {
 		var v Document
-		if err := rows.Scan(&v.ID, &v.OriginalFilename, &v.MIMEType, &v.SizeBytes, &v.SHA256, &v.ObjectKey, &v.DocumentDate, &v.Description, &v.CreatedAt); err != nil {
+		if err := rows.Scan(&v.ID, &v.OriginalFilename, &v.MIMEType, &v.SizeBytes, &v.SHA256, &v.ObjectKey, &v.DocumentDate, &v.Description, &v.TranslationText, &v.TranslationStatus, &v.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, v)
 	}
 	return items, rows.Err()
+}
+func (s *MySQL) UpdateDocumentTranslation(ctx context.Context, id int64, status string, text string) error {
+	r, err := s.db.ExecContext(ctx, `update documents set translation_status=?,translation_text=? where id=?`, status, text, id)
+	if err := mysqlDelete(r, err, "document not found"); err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `insert into document_analyses(document_id,analysis_type,status,language,content_text) values(?,'translation',?,'nl',?) on duplicate key update status=values(status),language=values(language),content_text=values(content_text),updated_at=current_timestamp(6)`, id, status, text)
+	return err
 }
 func (s *MySQL) LinkDocument(ctx context.Context, documentID int64, objectType string, objectID int64) error {
 	if !supportedDocumentTarget(objectType) {
@@ -71,7 +81,7 @@ func (s *MySQL) DocumentsForObject(ctx context.Context, objectType string, objec
 	if !supportedDocumentTarget(objectType) {
 		return nil, fmt.Errorf("unsupported object type")
 	}
-	return s.documentsQuery(ctx, `select `+mysqlDocumentColumns+` from documents where exists(select 1 from entity_relations where source_type='document' and source_id=documents.id and target_type=? and target_id=? and relation_type='evidence_for') order by created_at desc,id desc`, objectType, objectID)
+	return s.documentsQuery(ctx, `select `+mysqlDocumentColumns+` from documents`+mysqlDocumentJoin+` where exists(select 1 from entity_relations where source_type='document' and source_id=documents.id and target_type=? and target_id=? and relation_type='evidence_for') order by documents.created_at desc,documents.id desc`, objectType, objectID)
 }
 func (s *MySQL) UnlinkDocument(ctx context.Context, documentID int64, objectType string, objectID int64) error {
 	if !supportedDocumentTarget(objectType) {
@@ -206,7 +216,7 @@ func (s *MySQL) DeleteAsset(ctx context.Context, id int64) error {
 }
 
 func (s *MySQL) Liabilities(ctx context.Context, filter LiabilityFilter) ([]Liability, error) {
-	rows, err := s.db.QueryContext(ctx, `select `+mysqlLiabilityColumns+` from liabilities where (?='' or liability_type=?) and (?='' or status=?) order by status,name,id`, filter.LiabilityType, filter.LiabilityType, filter.Status, filter.Status)
+	rows, err := s.db.QueryContext(ctx, `select `+mysqlLiabilityColumns+` from liabilities`+mysqlLiabilityJoin+` where (?='' or liability_type=?) and (?='' or status=?) order by status,liabilities.name,liabilities.id`, filter.LiabilityType, filter.LiabilityType, filter.Status, filter.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +233,7 @@ func (s *MySQL) Liabilities(ctx context.Context, filter LiabilityFilter) ([]Liab
 }
 func (s *MySQL) Liability(ctx context.Context, id int64) (Liability, error) {
 	var v Liability
-	err := scanLiability(s.db.QueryRowContext(ctx, `select `+mysqlLiabilityColumns+` from liabilities where id=?`, id), &v)
+	err := scanLiability(s.db.QueryRowContext(ctx, `select `+mysqlLiabilityColumns+` from liabilities`+mysqlLiabilityJoin+` where liabilities.id=?`, id), &v)
 	if err == sql.ErrNoRows {
 		return Liability{}, fmt.Errorf("liability not found")
 	}
@@ -239,7 +249,11 @@ func (s *MySQL) CreateLiability(ctx context.Context, input SaveLiability) (Liabi
 		return Liability{}, err
 	}
 	defer tx.Rollback()
-	r, err := tx.ExecContext(ctx, `insert into liabilities(household_id,liability_type,name,description,creditor,start_date,end_date,original_amount,current_balance,currency,status) values ((select id from households order by id limit 1),?,?,?,?,?,?,?,?,?,?)`, input.LiabilityType, input.Name, input.Description, input.Creditor, start, end, input.OriginalAmountCents, input.CurrentBalanceCents, input.Currency, input.Status)
+	creditorPartyID, err := ensureSQLPartyByName(ctx, tx, input.Creditor)
+	if err != nil {
+		return Liability{}, err
+	}
+	r, err := tx.ExecContext(ctx, `insert into liabilities(household_id,liability_type,name,description,creditor,creditor_party_id,start_date,end_date,original_amount,current_balance,currency,status) values ((select id from households order by id limit 1),?,?,?,?,?,?,?,?,?,?,?)`, input.LiabilityType, input.Name, input.Description, input.Creditor, nullableInt64Value(creditorPartyID), start, end, input.OriginalAmountCents, input.CurrentBalanceCents, input.Currency, input.Status)
 	if err != nil {
 		return Liability{}, err
 	}
@@ -251,7 +265,7 @@ func (s *MySQL) CreateLiability(ctx context.Context, input SaveLiability) (Liabi
 		return Liability{}, err
 	}
 	var v Liability
-	if err = scanLiability(tx.QueryRowContext(ctx, `select `+mysqlLiabilityColumns+` from liabilities where id=?`, id), &v); err != nil {
+	if err = scanLiability(tx.QueryRowContext(ctx, `select `+mysqlLiabilityColumns+` from liabilities`+mysqlLiabilityJoin+` where liabilities.id=?`, id), &v); err != nil {
 		return Liability{}, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -269,13 +283,17 @@ func (s *MySQL) UpdateLiability(ctx context.Context, id int64, input SaveLiabili
 		return Liability{}, err
 	}
 	defer tx.Rollback()
+	creditorPartyID, err := ensureSQLPartyByName(ctx, tx, input.Creditor)
+	if err != nil {
+		return Liability{}, err
+	}
 	var old string
 	if err = tx.QueryRowContext(ctx, `select status from liabilities where id=? for update`, id).Scan(&old); err == sql.ErrNoRows {
 		return Liability{}, fmt.Errorf("liability not found")
 	} else if err != nil {
 		return Liability{}, err
 	}
-	_, err = tx.ExecContext(ctx, `update liabilities set liability_type=?,name=?,description=?,creditor=?,start_date=?,end_date=?,original_amount=?,current_balance=?,currency=?,status=?,updated_at=utc_timestamp(6) where id=?`, input.LiabilityType, input.Name, input.Description, input.Creditor, start, end, input.OriginalAmountCents, input.CurrentBalanceCents, input.Currency, input.Status, id)
+	_, err = tx.ExecContext(ctx, `update liabilities set liability_type=?,name=?,description=?,creditor=?,creditor_party_id=?,start_date=?,end_date=?,original_amount=?,current_balance=?,currency=?,status=?,updated_at=utc_timestamp(6) where id=?`, input.LiabilityType, input.Name, input.Description, input.Creditor, nullableInt64Value(creditorPartyID), start, end, input.OriginalAmountCents, input.CurrentBalanceCents, input.Currency, input.Status, id)
 	if err != nil {
 		return Liability{}, err
 	}
@@ -287,7 +305,7 @@ func (s *MySQL) UpdateLiability(ctx context.Context, id int64, input SaveLiabili
 		return Liability{}, err
 	}
 	var v Liability
-	if err = scanLiability(tx.QueryRowContext(ctx, `select `+mysqlLiabilityColumns+` from liabilities where id=?`, id), &v); err != nil {
+	if err = scanLiability(tx.QueryRowContext(ctx, `select `+mysqlLiabilityColumns+` from liabilities`+mysqlLiabilityJoin+` where liabilities.id=?`, id), &v); err != nil {
 		return Liability{}, err
 	}
 	if err = tx.Commit(); err != nil {

@@ -22,6 +22,7 @@ var (
 	_ DocumentRepository       = (*SQLite)(nil)
 	_ AssetRepository          = (*SQLite)(nil)
 	_ LiabilityRepository      = (*SQLite)(nil)
+	_ ReservationRepository    = (*SQLite)(nil)
 	_ CaseRepository           = (*SQLite)(nil)
 	_ EntityRelationRepository = (*SQLite)(nil)
 	_ DomainEventRepository    = (*SQLite)(nil)
@@ -419,14 +420,18 @@ func (s *SQLite) ImportTransactions(ctx context.Context, accountID int64, transa
 			occurrences[baseFingerprint]++
 			fingerprint = transactionFingerprintOccurrence(baseFingerprint, occurrences[baseFingerprint])
 		}
+		partyID, err := ensureSQLPartyForTransaction(ctx, tx, accountID, transaction.Counterparty, transaction.CounterpartyIBAN, "sqlite")
+		if err != nil {
+			return ImportResult{}, err
+		}
 
 		execResult, err := tx.ExecContext(ctx, `
 			insert into transactions (
-				account_id, booked_on, description, counterparty, counterparty_iban,
+				account_id, booked_on, description, counterparty, counterparty_iban, counterparty_party_id, counterparty_name_raw, counterparty_iban_raw,
 				amount_cents, external_reference, import_fingerprint
-			) values (?, ?, ?, ?, ?, ?, ?, ?)
+			) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			on conflict (import_fingerprint) where import_fingerprint is not null and import_fingerprint != '' do nothing
-		`, accountID, transaction.BookedOn, transaction.Description, transaction.Counterparty, transaction.CounterpartyIBAN, transaction.AmountCents, transaction.ExternalReference, fingerprint)
+		`, accountID, transaction.BookedOn, transaction.Description, transaction.Counterparty, transaction.CounterpartyIBAN, nullableInt64Value(partyID), transaction.Counterparty, transaction.CounterpartyIBAN, transaction.AmountCents, transaction.ExternalReference, fingerprint)
 		if err != nil {
 			return ImportResult{}, err
 		}
@@ -453,11 +458,12 @@ func (s *SQLite) Transactions(ctx context.Context, filter TransactionFilter) ([]
 
 	query := `
 		select transactions.id, transactions.account_id, coalesce(transactions.category_id, 0), transactions.booked_on, transactions.description,
-			coalesce(transactions.counterparty, ''), coalesce(transactions.counterparty_iban, ''), transactions.amount_cents,
+			coalesce(parties.name, transactions.counterparty_name_raw, transactions.counterparty, ''), coalesce(transactions.counterparty_iban_raw, transactions.counterparty_iban, ''), transactions.amount_cents,
 			coalesce(transactions.external_reference, ''), coalesce(transactions.import_fingerprint, ''), transactions.hidden,
 			(select count(distinct source_id) from entity_relations where source_type = 'document' and target_type = 'transaction' and target_id = transactions.id and relation_type = 'evidence_for')
 		from transactions
 		left join categories on categories.id = transactions.category_id
+		left join parties on parties.id = transactions.counterparty_party_id
 		where (? = 0 or account_id = ?)
 		and (? = 0 or transactions.category_id = ?)
 		and (? = 0 or categories.main_category_id = ?)
@@ -466,8 +472,8 @@ func (s *SQLite) Transactions(ctx context.Context, filter TransactionFilter) ([]
 		and (
 			? = ''
 			or lower(transactions.description) like '%' || lower(?) || '%'
-			or lower(coalesce(transactions.counterparty, '')) like '%' || lower(?) || '%'
-			or lower(coalesce(transactions.counterparty_iban, '')) like '%' || lower(?) || '%'
+			or lower(coalesce(parties.name, transactions.counterparty_name_raw, transactions.counterparty, '')) like '%' || lower(?) || '%'
+			or lower(coalesce(transactions.counterparty_iban_raw, transactions.counterparty_iban, '')) like '%' || lower(?) || '%'
 			or lower(coalesce(transactions.external_reference, '')) like '%' || lower(?) || '%'
 		)
 		and (? = false or transactions.category_id is null)
@@ -534,6 +540,7 @@ func (s *SQLite) TransactionSummary(ctx context.Context, filter TransactionFilte
 		select count(*), coalesce(sum(transactions.amount_cents), 0)
 		from transactions
 		left join categories on categories.id = transactions.category_id
+		left join parties on parties.id = transactions.counterparty_party_id
 		where (? = 0 or account_id = ?)
 		and (? = 0 or transactions.category_id = ?)
 		and (? = 0 or categories.main_category_id = ?)
@@ -542,8 +549,8 @@ func (s *SQLite) TransactionSummary(ctx context.Context, filter TransactionFilte
 		and (
 			? = ''
 			or lower(transactions.description) like '%' || lower(?) || '%'
-			or lower(coalesce(transactions.counterparty, '')) like '%' || lower(?) || '%'
-			or lower(coalesce(transactions.counterparty_iban, '')) like '%' || lower(?) || '%'
+			or lower(coalesce(parties.name, transactions.counterparty_name_raw, transactions.counterparty, '')) like '%' || lower(?) || '%'
+			or lower(coalesce(transactions.counterparty_iban_raw, transactions.counterparty_iban, '')) like '%' || lower(?) || '%'
 			or lower(coalesce(transactions.external_reference, '')) like '%' || lower(?) || '%'
 		)
 		and (? = false or transactions.category_id is null)
@@ -583,10 +590,22 @@ func (s *SQLite) CategorizeTransaction(ctx context.Context, id int64, input Cate
 		return CategorizeResult{Updated: int(updated)}, nil
 	}
 
-	var accountID int64
+	var accountID, partyID int64
 	var counterparty string
-	if err := s.db.QueryRowContext(ctx, `select account_id, coalesce(counterparty, '') from transactions where id = ?`, id).Scan(&accountID, &counterparty); err != nil {
+	if err := s.db.QueryRowContext(ctx, `select account_id, coalesce(counterparty_party_id, 0), coalesce(counterparty_name_raw, counterparty, '') from transactions where id = ?`, id).Scan(&accountID, &partyID, &counterparty); err != nil {
 		return CategorizeResult{}, fmt.Errorf("transaction not found")
+	}
+	if partyID != 0 {
+		result, err := s.db.ExecContext(ctx, `
+			update transactions
+			set category_id = ?
+			where account_id = ? and counterparty_party_id = ? and category_id is null
+		`, input.CategoryID, accountID, partyID)
+		if err != nil {
+			return CategorizeResult{}, err
+		}
+		updated, _ := result.RowsAffected()
+		return CategorizeResult{Updated: int(updated)}, nil
 	}
 	if strings.TrimSpace(counterparty) == "" {
 		result, err := s.db.ExecContext(ctx, `update transactions set category_id = ? where id = ?`, input.CategoryID, id)
@@ -600,7 +619,7 @@ func (s *SQLite) CategorizeTransaction(ctx context.Context, id int64, input Cate
 	result, err := s.db.ExecContext(ctx, `
 		update transactions
 		set category_id = ?
-		where account_id = ? and counterparty = ? and category_id is null
+		where account_id = ? and coalesce(counterparty_name_raw, counterparty) = ? and category_id is null
 	`, input.CategoryID, accountID, counterparty)
 	if err != nil {
 		return CategorizeResult{}, err
@@ -752,10 +771,28 @@ func (s *SQLite) ensureSchema(ctx context.Context, db sqliteInitializer) error {
 	if err := s.ensureColumn(ctx, db, "transactions", "hidden", "integer not null default 0 check (hidden in (0, 1))"); err != nil {
 		return err
 	}
+	if err := s.ensureColumn(ctx, db, "transactions", "counterparty_party_id", "integer references parties(id) on delete set null"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, db, "transactions", "counterparty_name_raw", "text"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, db, "transactions", "counterparty_iban_raw", "text"); err != nil {
+		return err
+	}
 	if err := s.ensureColumn(ctx, db, "cases", "main_category_id", "integer references main_categories(id) on delete cascade"); err != nil {
 		return err
 	}
 	if err := s.ensureColumn(ctx, db, "cases", "term_months", "integer check (term_months is null or term_months > 0)"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, db, "documents", "translation_text", "text"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, db, "documents", "translation_status", "text not null default 'not_requested' check (translation_status in ('not_requested', 'pending', 'completed', 'unsupported', 'failed'))"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, db, "liabilities", "creditor_party_id", "integer references parties(id) on delete set null"); err != nil {
 		return err
 	}
 	if _, err := db.ExecContext(ctx, sqliteUpgradeSchema); err != nil {
@@ -995,6 +1032,9 @@ create table if not exists transactions (
     description text not null,
     counterparty text,
     counterparty_iban text,
+    counterparty_party_id integer references parties(id) on delete set null,
+    counterparty_name_raw text,
+    counterparty_iban_raw text,
     amount_cents integer not null,
     external_reference text,
     import_fingerprint text,
@@ -1015,9 +1055,49 @@ create table if not exists documents (
     object_key text not null unique,
     document_date text check (document_date is null or (length(document_date) = 10 and strftime('%Y-%m-%d', document_date) = document_date)),
     description text,
+	translation_text text,
+	translation_status text not null default 'not_requested' check (translation_status in ('not_requested', 'pending', 'completed', 'unsupported', 'failed')),
     created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 create index if not exists documents_sha256_idx on documents(sha256);
+
+create table if not exists document_analyses (
+    id integer primary key,
+    document_id integer not null references documents(id) on delete cascade,
+    analysis_type text not null check (analysis_type in ('translation', 'analysis')),
+    status text not null default 'pending' check (status in ('not_requested', 'pending', 'completed', 'unsupported', 'failed')),
+    language text,
+    model text,
+    content_text text,
+    content_json text,
+    error_message text,
+    created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    unique (document_id, analysis_type)
+);
+
+create table if not exists parties (
+    id integer primary key,
+    household_id integer not null default 1 references households(id) on delete cascade,
+    party_type text not null default 'organization' check (party_type in ('person', 'organization', 'bank', 'government', 'insurer', 'supplier', 'other')),
+    name text not null check (trim(name) <> ''),
+    notes text,
+    created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+create index if not exists parties_household_name_idx on parties(household_id, lower(name));
+
+create table if not exists party_identifiers (
+    id integer primary key,
+    household_id integer not null default 1 references households(id) on delete cascade,
+    party_id integer not null references parties(id) on delete cascade,
+    identifier_type text not null check (identifier_type in ('iban', 'bic', 'creditor_id', 'vat_id', 'tax_id', 'customer_number', 'email', 'phone', 'other')),
+    identifier_value text not null check (trim(identifier_value) <> ''),
+    normalized_value text not null check (trim(normalized_value) <> ''),
+    created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    unique (household_id, identifier_type, normalized_value)
+);
+create index if not exists party_identifiers_party_idx on party_identifiers(party_id);
 
 create table if not exists assets (
     id integer primary key,
@@ -1067,6 +1147,20 @@ create table if not exists liabilities (
 );
 create index if not exists liabilities_household_type_status_idx on liabilities(household_id, liability_type, status, name);
 
+create table if not exists reservations (
+    id integer primary key,
+    household_id integer not null default 1 references households(id) on delete cascade,
+    reserve_type text not null check (reserve_type in ('mortgage', 'loan', 'tax_debt', 'credit', 'other')),
+    name text not null check (trim(name) <> ''),
+    description text,
+    due_date text check (due_date is null or (length(due_date) = 10 and strftime('%Y-%m-%d', due_date) = due_date)),
+    amount integer not null default 0 check (amount >= 0),
+    currency text not null default 'EUR' check (length(currency) = 3),
+    created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+create index if not exists reservations_household_type_due_idx on reservations(household_id, reserve_type, due_date, name);
+
 create table if not exists cases (
     id integer primary key,
     household_id integer not null default 1 references households(id) on delete cascade,
@@ -1104,30 +1198,85 @@ create index if not exists entity_relations_target_idx on entity_relations(targe
 
 create table if not exists domain_events (
     id integer primary key,
-    entity_type text not null check (entity_type in ('asset', 'liability', 'case')),
+    entity_type text not null check (entity_type in ('asset', 'liability', 'case', 'reservation')),
     entity_id integer not null check (entity_id > 0),
     event_type text not null check (trim(event_type) <> ''),
     event_date text not null check (length(event_date) = 10 and strftime('%Y-%m-%d', event_date) = event_date),
     description text not null check (trim(description) <> ''),
-    related_entity_type text check (related_entity_type is null or related_entity_type in ('document', 'transaction', 'asset', 'liability', 'case')),
+    related_entity_type text check (related_entity_type is null or related_entity_type in ('document', 'transaction', 'asset', 'liability', 'case', 'reservation')),
     related_entity_id integer check (related_entity_id is null or related_entity_id > 0),
     created_at text not null default (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     check ((related_entity_type is null) = (related_entity_id is null)),
     check (related_entity_type is null or entity_type <> related_entity_type or entity_id <> related_entity_id)
 );
 create index if not exists domain_events_timeline_idx on domain_events(entity_type, entity_id, event_date desc, id desc);
-create unique index if not exists domain_events_creation_unique_idx on domain_events(entity_type, entity_id) where event_type in ('asset_created', 'liability_created', 'case_created');
+create unique index if not exists domain_events_creation_unique_idx on domain_events(entity_type, entity_id) where event_type in ('asset_created', 'liability_created', 'case_created', 'reservation_created');
 
 insert into domain_events (entity_type, entity_id, event_type, event_date, description, created_at)
 select 'asset', id, 'asset_created', substr(created_at, 1, 10), 'Bezitting aangemaakt', created_at from assets where true on conflict do nothing;
 insert into domain_events (entity_type, entity_id, event_type, event_date, description, created_at)
 select 'liability', id, 'liability_created', substr(created_at, 1, 10), 'Schuld aangemaakt', created_at from liabilities where true on conflict do nothing;
 insert into domain_events (entity_type, entity_id, event_type, event_date, description, created_at)
+select 'reservation', id, 'reservation_created', substr(created_at, 1, 10), 'Reservering aangemaakt', created_at from reservations where true on conflict do nothing;
+insert into domain_events (entity_type, entity_id, event_type, event_date, description, created_at)
 select 'case', id, 'case_created', substr(created_at, 1, 10), 'Dossier aangemaakt', created_at from cases where true on conflict do nothing;
 `
 
 const sqliteUpgradeSchema = `
 create unique index if not exists cases_main_category_unique_idx on cases(main_category_id) where main_category_id is not null;
+
+insert into document_analyses (document_id, analysis_type, status, language, content_text, created_at, updated_at)
+select id, 'translation', translation_status, 'nl', nullif(translation_text, ''), created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+from documents
+where (translation_status <> 'not_requested' or trim(coalesce(translation_text, '')) <> '')
+and not exists (select 1 from document_analyses where document_id = documents.id and analysis_type = 'translation');
+
+insert into parties (household_id, party_type, name)
+select distinct household_id, 'organization', trim(creditor)
+from liabilities
+where trim(coalesce(creditor, '')) <> ''
+and not exists (select 1 from parties where parties.household_id = liabilities.household_id and lower(parties.name) = lower(trim(liabilities.creditor)));
+
+update liabilities
+set creditor_party_id = (
+    select parties.id from parties
+    where parties.household_id = liabilities.household_id and lower(parties.name) = lower(trim(liabilities.creditor))
+    order by parties.id limit 1
+)
+where creditor_party_id is null and trim(coalesce(creditor, '')) <> '';
+
+update transactions set counterparty_name_raw = counterparty where counterparty_name_raw is null and trim(coalesce(counterparty, '')) <> '';
+update transactions set counterparty_iban_raw = counterparty_iban where counterparty_iban_raw is null and trim(coalesce(counterparty_iban, '')) <> '';
+
+insert into parties (household_id, party_type, name)
+select distinct accounts.household_id, 'organization', trim(transactions.counterparty_name_raw)
+from transactions
+join accounts on accounts.id = transactions.account_id
+where trim(coalesce(transactions.counterparty_name_raw, '')) <> ''
+and not exists (select 1 from parties where parties.household_id = accounts.household_id and lower(parties.name) = lower(trim(transactions.counterparty_name_raw)));
+
+update transactions
+set counterparty_party_id = (
+    select parties.id from parties
+    join accounts on accounts.id = transactions.account_id
+    where parties.household_id = accounts.household_id and lower(parties.name) = lower(trim(transactions.counterparty_name_raw))
+    order by parties.id limit 1
+)
+where counterparty_party_id is null and trim(coalesce(counterparty_name_raw, '')) <> '';
+
+insert into party_identifiers (household_id, party_id, identifier_type, identifier_value, normalized_value)
+select distinct accounts.household_id, transactions.counterparty_party_id, 'iban', trim(transactions.counterparty_iban_raw), upper(replace(trim(transactions.counterparty_iban_raw), ' ', ''))
+from transactions
+join accounts on accounts.id = transactions.account_id
+where transactions.counterparty_party_id is not null and trim(coalesce(transactions.counterparty_iban_raw, '')) <> ''
+and not exists (
+    select 1 from party_identifiers
+    where party_identifiers.household_id = accounts.household_id
+    and party_identifiers.identifier_type = 'iban'
+    and party_identifiers.normalized_value = upper(replace(trim(transactions.counterparty_iban_raw), ' ', ''))
+);
+
+create index if not exists transactions_counterparty_party_idx on transactions(counterparty_party_id, booked_on desc) where counterparty_party_id is not null;
 
 create trigger if not exists accounts_type_insert_check
 before insert on accounts

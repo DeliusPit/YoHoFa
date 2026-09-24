@@ -84,7 +84,11 @@ func (s *Postgres) CreateManualTransaction(ctx context.Context, input CreateManu
 		category = input.CategoryID
 	}
 	var id int64
-	if err := tx.QueryRow(ctx, `insert into transactions(account_id,category_id,booked_on,description,counterparty,amount_cents) values($1,$2,$3,$4,$5,$6) returning id`, input.AccountID, category, input.BookedOn, input.Description, input.Counterparty, input.AmountCents).Scan(&id); err != nil {
+	partyID, err := ensurePostgresPartyForTransaction(ctx, tx, input.AccountID, input.Counterparty, "")
+	if err != nil {
+		return Transaction{}, err
+	}
+	if err := tx.QueryRow(ctx, `insert into transactions(account_id,category_id,booked_on,description,counterparty,counterparty_party_id,counterparty_name_raw,amount_cents) values($1,$2,$3,$4,$5,$6,$7,$8) returning id`, input.AccountID, category, input.BookedOn, input.Description, input.Counterparty, nullableInt64Value(partyID), input.Counterparty, input.AmountCents).Scan(&id); err != nil {
 		return Transaction{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -122,7 +126,11 @@ func (s *SQLite) CreateManualTransaction(ctx context.Context, input CreateManual
 		}
 		category = input.CategoryID
 	}
-	result, err := tx.ExecContext(ctx, `insert into transactions(account_id,category_id,booked_on,description,counterparty,amount_cents) values(?,?,?,?,?,?)`, input.AccountID, category, input.BookedOn, input.Description, input.Counterparty, input.AmountCents)
+	partyID, err := ensureSQLPartyForTransaction(ctx, tx, input.AccountID, input.Counterparty, "", "sqlite")
+	if err != nil {
+		return Transaction{}, err
+	}
+	result, err := tx.ExecContext(ctx, `insert into transactions(account_id,category_id,booked_on,description,counterparty,counterparty_party_id,counterparty_name_raw,amount_cents) values(?,?,?,?,?,?,?,?)`, input.AccountID, category, input.BookedOn, input.Description, input.Counterparty, nullableInt64Value(partyID), input.Counterparty, input.AmountCents)
 	if err != nil {
 		return Transaction{}, err
 	}
@@ -165,7 +173,11 @@ func (s *MySQL) CreateManualTransaction(ctx context.Context, input CreateManualT
 		}
 		category = input.CategoryID
 	}
-	result, err := tx.ExecContext(ctx, `insert into transactions(account_id,category_id,booked_on,description,counterparty,amount_cents) values(?,?,?,?,?,?)`, input.AccountID, category, input.BookedOn, input.Description, input.Counterparty, input.AmountCents)
+	partyID, err := ensureSQLPartyForTransaction(ctx, tx, input.AccountID, input.Counterparty, "", "mysql")
+	if err != nil {
+		return Transaction{}, err
+	}
+	result, err := tx.ExecContext(ctx, `insert into transactions(account_id,category_id,booked_on,description,counterparty,counterparty_party_id,counterparty_name_raw,amount_cents) values(?,?,?,?,?,?,?,?)`, input.AccountID, category, input.BookedOn, input.Description, input.Counterparty, nullableInt64Value(partyID), input.Counterparty, input.AmountCents)
 	if err != nil {
 		return Transaction{}, err
 	}

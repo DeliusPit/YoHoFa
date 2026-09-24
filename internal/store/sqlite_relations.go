@@ -201,10 +201,11 @@ func (s *SQLite) sqliteUnlinkObjectTransaction(ctx context.Context, objectType s
 func (s *SQLite) sqliteObjectTransactions(ctx context.Context, objectType string, objectID int64) ([]Transaction, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		select transactions.id, transactions.account_id, coalesce(transactions.category_id, 0), transactions.booked_on, transactions.description,
-			coalesce(transactions.counterparty, ''), coalesce(transactions.counterparty_iban, ''), transactions.amount_cents,
+			coalesce(parties.name, transactions.counterparty_name_raw, transactions.counterparty, ''), coalesce(transactions.counterparty_iban_raw, transactions.counterparty_iban, ''), transactions.amount_cents,
 			coalesce(transactions.external_reference, ''), coalesce(transactions.import_fingerprint, ''), transactions.hidden,
 			(select count(distinct source_id) from entity_relations where source_type = 'document' and target_type = 'transaction' and target_id = transactions.id and relation_type = 'evidence_for')
 		from transactions
+		left join parties on parties.id = transactions.counterparty_party_id
 		where exists (
 			select 1 from entity_relations where target_type = 'transaction' and target_id = transactions.id
 			and source_type = ? and source_id = ? and relation_type = 'relates_to'
@@ -300,6 +301,8 @@ func sqliteValidateEntity(ctx context.Context, tx *sql.Tx, entityType string, en
 		table = "documents"
 	case ObjectTypeCase:
 		table = "cases"
+	case ObjectTypeReservation:
+		table = "reservations"
 	default:
 		return fmt.Errorf("unsupported entity type")
 	}

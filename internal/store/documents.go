@@ -11,15 +11,17 @@ import (
 const ObjectTypeTransaction = "transaction"
 
 type Document struct {
-	ID               int64  `json:"id"`
-	OriginalFilename string `json:"originalFilename"`
-	MIMEType         string `json:"mimeType"`
-	SizeBytes        int64  `json:"sizeBytes"`
-	SHA256           string `json:"sha256"`
-	ObjectKey        string `json:"-"`
-	DocumentDate     string `json:"documentDate,omitempty"`
-	Description      string `json:"description,omitempty"`
-	CreatedAt        string `json:"createdAt"`
+	ID                int64  `json:"id"`
+	OriginalFilename  string `json:"originalFilename"`
+	MIMEType          string `json:"mimeType"`
+	SizeBytes         int64  `json:"sizeBytes"`
+	SHA256            string `json:"sha256"`
+	ObjectKey         string `json:"-"`
+	DocumentDate      string `json:"documentDate,omitempty"`
+	Description       string `json:"description,omitempty"`
+	TranslationText   string `json:"translationText,omitempty"`
+	TranslationStatus string `json:"translationStatus"`
+	CreatedAt         string `json:"createdAt"`
 }
 
 type CreateDocument struct {
@@ -39,6 +41,7 @@ type DocumentRepository interface {
 	LinkDocument(context.Context, int64, string, int64) error
 	DocumentsForObject(context.Context, string, int64) ([]Document, error)
 	UnlinkDocument(context.Context, int64, string, int64) error
+	UpdateDocumentTranslation(context.Context, int64, string, string) error
 }
 
 func (s *Postgres) CreateDocument(ctx context.Context, input CreateDocument) (Document, error) {
@@ -55,10 +58,10 @@ func (s *Postgres) CreateDocument(ctx context.Context, input CreateDocument) (Do
 		insert into documents (original_filename, mime_type, size_bytes, sha256, object_key, document_date, description)
 		values ($1, $2, $3, $4, $5, $6, $7)
 		returning id, original_filename, mime_type, size_bytes, sha256, object_key,
-			coalesce(to_char(document_date, 'YYYY-MM-DD'), ''), coalesce(description, ''), created_at::text
+			coalesce(to_char(document_date, 'YYYY-MM-DD'), ''), coalesce(description, ''), coalesce(translation_text, ''), translation_status, created_at::text
 	`, input.OriginalFilename, input.MIMEType, input.SizeBytes, input.SHA256, input.ObjectKey, documentDate, input.Description).Scan(
 		&item.ID, &item.OriginalFilename, &item.MIMEType, &item.SizeBytes, &item.SHA256, &item.ObjectKey,
-		&item.DocumentDate, &item.Description, &item.CreatedAt,
+		&item.DocumentDate, &item.Description, &item.TranslationText, &item.TranslationStatus, &item.CreatedAt,
 	)
 	return item, err
 }
@@ -66,10 +69,13 @@ func (s *Postgres) CreateDocument(ctx context.Context, input CreateDocument) (Do
 func (s *Postgres) Document(ctx context.Context, id int64) (Document, error) {
 	var item Document
 	err := s.pool.QueryRow(ctx, `
-		select id, original_filename, mime_type, size_bytes, sha256, object_key,
-			coalesce(to_char(document_date, 'YYYY-MM-DD'), ''), coalesce(description, ''), created_at::text
-		from documents where id = $1
-	`, id).Scan(&item.ID, &item.OriginalFilename, &item.MIMEType, &item.SizeBytes, &item.SHA256, &item.ObjectKey, &item.DocumentDate, &item.Description, &item.CreatedAt)
+		select documents.id, documents.original_filename, documents.mime_type, documents.size_bytes, documents.sha256, documents.object_key,
+			coalesce(to_char(documents.document_date, 'YYYY-MM-DD'), ''), coalesce(documents.description, ''),
+			coalesce(document_analyses.content_text, documents.translation_text, ''), coalesce(document_analyses.status, documents.translation_status), documents.created_at::text
+		from documents
+		left join document_analyses on document_analyses.document_id = documents.id and document_analyses.analysis_type = 'translation'
+		where documents.id = $1
+	`, id).Scan(&item.ID, &item.OriginalFilename, &item.MIMEType, &item.SizeBytes, &item.SHA256, &item.ObjectKey, &item.DocumentDate, &item.Description, &item.TranslationText, &item.TranslationStatus, &item.CreatedAt)
 	if err == pgx.ErrNoRows {
 		return Document{}, fmt.Errorf("document not found")
 	}
@@ -78,9 +84,12 @@ func (s *Postgres) Document(ctx context.Context, id int64) (Document, error) {
 
 func (s *Postgres) Documents(ctx context.Context) ([]Document, error) {
 	return s.documentsQuery(ctx, `
-		select id, original_filename, mime_type, size_bytes, sha256, object_key,
-			coalesce(to_char(document_date, 'YYYY-MM-DD'), ''), coalesce(description, ''), created_at::text
-		from documents order by created_at desc, id desc
+		select documents.id, documents.original_filename, documents.mime_type, documents.size_bytes, documents.sha256, documents.object_key,
+			coalesce(to_char(documents.document_date, 'YYYY-MM-DD'), ''), coalesce(documents.description, ''),
+			coalesce(document_analyses.content_text, documents.translation_text, ''), coalesce(document_analyses.status, documents.translation_status), documents.created_at::text
+		from documents
+		left join document_analyses on document_analyses.document_id = documents.id and document_analyses.analysis_type = 'translation'
+		order by documents.created_at desc, documents.id desc
 	`)
 }
 
@@ -102,8 +111,10 @@ func (s *Postgres) DocumentsForObject(ctx context.Context, objectType string, ob
 	}
 	return s.documentsQuery(ctx, `
 		select documents.id, documents.original_filename, documents.mime_type, documents.size_bytes, documents.sha256, documents.object_key,
-			coalesce(to_char(documents.document_date, 'YYYY-MM-DD'), ''), coalesce(documents.description, ''), documents.created_at::text
+			coalesce(to_char(documents.document_date, 'YYYY-MM-DD'), ''), coalesce(documents.description, ''),
+			coalesce(document_analyses.content_text, documents.translation_text, ''), coalesce(document_analyses.status, documents.translation_status), documents.created_at::text
 		from documents
+		left join document_analyses on document_analyses.document_id = documents.id and document_analyses.analysis_type = 'translation'
 		where exists (
 			select 1 from entity_relations
 			where source_type = 'document' and source_id = documents.id
@@ -111,6 +122,25 @@ func (s *Postgres) DocumentsForObject(ctx context.Context, objectType string, ob
 		)
 		order by documents.created_at desc, documents.id desc
 	`, objectType, objectID)
+}
+
+func (s *Postgres) UpdateDocumentTranslation(ctx context.Context, id int64, status string, text string) error {
+	result, err := s.pool.Exec(ctx, `
+		with updated as (
+			update documents set translation_status = $1, translation_text = $2 where id = $3 returning id
+		)
+		insert into document_analyses (document_id, analysis_type, status, language, content_text)
+		select id, 'translation', $1, 'nl', $2 from updated
+		on conflict (document_id, analysis_type) do update
+		set status = excluded.status, content_text = excluded.content_text, language = excluded.language, updated_at = now()
+	`, status, text, id)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("document not found")
+	}
+	return nil
 }
 
 func (s *Postgres) UnlinkDocument(ctx context.Context, documentID int64, objectType string, objectID int64) error {
@@ -156,7 +186,7 @@ func (s *Postgres) UnlinkDocument(ctx context.Context, documentID int64, objectT
 }
 
 func supportedDocumentTarget(objectType string) bool {
-	return objectType == ObjectTypeTransaction || objectType == ObjectTypeAsset || objectType == ObjectTypeLiability || objectType == ObjectTypeCase
+	return objectType == ObjectTypeTransaction || objectType == ObjectTypeAsset || objectType == ObjectTypeLiability || objectType == ObjectTypeCase || objectType == ObjectTypeReservation
 }
 
 func (s *Postgres) documentsQuery(ctx context.Context, query string, args ...any) ([]Document, error) {
@@ -169,7 +199,7 @@ func (s *Postgres) documentsQuery(ctx context.Context, query string, args ...any
 	items := []Document{}
 	for rows.Next() {
 		var item Document
-		if err := rows.Scan(&item.ID, &item.OriginalFilename, &item.MIMEType, &item.SizeBytes, &item.SHA256, &item.ObjectKey, &item.DocumentDate, &item.Description, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.OriginalFilename, &item.MIMEType, &item.SizeBytes, &item.SHA256, &item.ObjectKey, &item.DocumentDate, &item.Description, &item.TranslationText, &item.TranslationStatus, &item.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

@@ -119,7 +119,7 @@ func validateAppendDomainEvent(input AppendDomainEvent) error {
 }
 
 func validDomainEventOwner(entityType string) bool {
-	return entityType == ObjectTypeAsset || entityType == ObjectTypeLiability || entityType == ObjectTypeCase
+	return entityType == ObjectTypeAsset || entityType == ObjectTypeLiability || entityType == ObjectTypeCase || entityType == ObjectTypeReservation
 }
 
 func validDomainEventRelatedType(entityType string) bool {
@@ -140,6 +140,8 @@ func validateDomainEventOwnerExists(ctx context.Context, query domainEventQuerie
 		table = "liabilities"
 	case ObjectTypeCase:
 		table = "cases"
+	case ObjectTypeReservation:
+		table = "reservations"
 	default:
 		return fmt.Errorf("invalid domain event entity")
 	}

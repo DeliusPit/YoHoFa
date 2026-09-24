@@ -367,14 +367,18 @@ func (s *Postgres) ImportTransactions(ctx context.Context, accountID int64, tran
 			occurrences[baseFingerprint]++
 			fingerprint = transactionFingerprintOccurrence(baseFingerprint, occurrences[baseFingerprint])
 		}
+		partyID, err := ensurePostgresPartyForTransaction(ctx, tx, accountID, transaction.Counterparty, transaction.CounterpartyIBAN)
+		if err != nil {
+			return ImportResult{}, err
+		}
 
 		execResult, err := tx.Exec(ctx, `
 			insert into transactions (
-				account_id, booked_on, description, counterparty, counterparty_iban,
+				account_id, booked_on, description, counterparty, counterparty_iban, counterparty_party_id, counterparty_name_raw, counterparty_iban_raw,
 				amount_cents, external_reference, import_fingerprint
-			) values ($1, $2, $3, $4, $5, $6, $7, $8)
+			) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			on conflict (import_fingerprint) where import_fingerprint is not null and import_fingerprint != '' do nothing
-		`, accountID, transaction.BookedOn, transaction.Description, transaction.Counterparty, transaction.CounterpartyIBAN, transaction.AmountCents, transaction.ExternalReference, fingerprint)
+		`, accountID, transaction.BookedOn, transaction.Description, transaction.Counterparty, transaction.CounterpartyIBAN, nullableInt64Value(partyID), transaction.Counterparty, transaction.CounterpartyIBAN, transaction.AmountCents, transaction.ExternalReference, fingerprint)
 		if err != nil {
 			return ImportResult{}, err
 		}
@@ -400,11 +404,12 @@ func (s *Postgres) Transactions(ctx context.Context, filter TransactionFilter) (
 	search := strings.TrimSpace(filter.Search)
 	rows, err := s.pool.Query(ctx, `
 		select transactions.id, transactions.account_id, coalesce(transactions.category_id, 0), transactions.booked_on::text, transactions.description,
-			coalesce(transactions.counterparty, ''), coalesce(transactions.counterparty_iban, ''), transactions.amount_cents,
+			coalesce(parties.name, transactions.counterparty_name_raw, transactions.counterparty, ''), coalesce(transactions.counterparty_iban_raw, transactions.counterparty_iban, ''), transactions.amount_cents,
 			coalesce(transactions.external_reference, ''), coalesce(transactions.import_fingerprint, ''), transactions.hidden,
 			(select count(distinct source_id) from entity_relations where source_type = 'document' and target_type = 'transaction' and target_id = transactions.id and relation_type = 'evidence_for')
 		from transactions
 		left join categories on categories.id = transactions.category_id
+		left join parties on parties.id = transactions.counterparty_party_id
 		where ($1::bigint = 0 or account_id = $2)
 		and ($3::bigint = 0 or transactions.category_id = $4)
 		and ($5::bigint = 0 or categories.main_category_id = $6)
@@ -413,8 +418,8 @@ func (s *Postgres) Transactions(ctx context.Context, filter TransactionFilter) (
 		and (
 			$11::text = ''
 			or lower(transactions.description) like '%' || lower($12) || '%'
-			or lower(coalesce(transactions.counterparty, '')) like '%' || lower($13) || '%'
-			or lower(coalesce(transactions.counterparty_iban, '')) like '%' || lower($14) || '%'
+			or lower(coalesce(parties.name, transactions.counterparty_name_raw, transactions.counterparty, '')) like '%' || lower($13) || '%'
+			or lower(coalesce(transactions.counterparty_iban_raw, transactions.counterparty_iban, '')) like '%' || lower($14) || '%'
 			or lower(coalesce(transactions.external_reference, '')) like '%' || lower($15) || '%'
 		)
 		and ($16::boolean = false or transactions.category_id is null)
@@ -468,6 +473,7 @@ func (s *Postgres) TransactionSummary(ctx context.Context, filter TransactionFil
 		select count(*), coalesce(sum(transactions.amount_cents), 0)
 		from transactions
 		left join categories on categories.id = transactions.category_id
+		left join parties on parties.id = transactions.counterparty_party_id
 		where ($1::bigint = 0 or account_id = $2)
 		and ($3::bigint = 0 or transactions.category_id = $4)
 		and ($5::bigint = 0 or categories.main_category_id = $6)
@@ -476,8 +482,8 @@ func (s *Postgres) TransactionSummary(ctx context.Context, filter TransactionFil
 		and (
 			$11::text = ''
 			or lower(transactions.description) like '%' || lower($12) || '%'
-			or lower(coalesce(transactions.counterparty, '')) like '%' || lower($13) || '%'
-			or lower(coalesce(transactions.counterparty_iban, '')) like '%' || lower($14) || '%'
+			or lower(coalesce(parties.name, transactions.counterparty_name_raw, transactions.counterparty, '')) like '%' || lower($13) || '%'
+			or lower(coalesce(transactions.counterparty_iban_raw, transactions.counterparty_iban, '')) like '%' || lower($14) || '%'
 			or lower(coalesce(transactions.external_reference, '')) like '%' || lower($15) || '%'
 		)
 		and ($16::boolean = false or transactions.category_id is null)
@@ -512,10 +518,21 @@ func (s *Postgres) CategorizeTransaction(ctx context.Context, id int64, input Ca
 		return CategorizeResult{Updated: int(result.RowsAffected())}, nil
 	}
 
-	var accountID int64
+	var accountID, partyID int64
 	var counterparty string
-	if err := s.pool.QueryRow(ctx, `select account_id, coalesce(counterparty, '') from transactions where id = $1`, id).Scan(&accountID, &counterparty); err != nil {
+	if err := s.pool.QueryRow(ctx, `select account_id, coalesce(counterparty_party_id, 0), coalesce(counterparty_name_raw, counterparty, '') from transactions where id = $1`, id).Scan(&accountID, &partyID, &counterparty); err != nil {
 		return CategorizeResult{}, fmt.Errorf("transaction not found")
+	}
+	if partyID != 0 {
+		result, err := s.pool.Exec(ctx, `
+			update transactions
+			set category_id = $1
+			where account_id = $2 and counterparty_party_id = $3 and category_id is null
+		`, input.CategoryID, accountID, partyID)
+		if err != nil {
+			return CategorizeResult{}, err
+		}
+		return CategorizeResult{Updated: int(result.RowsAffected())}, nil
 	}
 	if strings.TrimSpace(counterparty) == "" {
 		result, err := s.pool.Exec(ctx, `update transactions set category_id = $1 where id = $2`, input.CategoryID, id)
@@ -528,7 +545,7 @@ func (s *Postgres) CategorizeTransaction(ctx context.Context, id int64, input Ca
 	result, err := s.pool.Exec(ctx, `
 		update transactions
 		set category_id = $1
-		where account_id = $2 and counterparty = $3 and category_id is null
+		where account_id = $2 and coalesce(counterparty_name_raw, counterparty) = $3 and category_id is null
 	`, input.CategoryID, accountID, counterparty)
 	if err != nil {
 		return CategorizeResult{}, err
@@ -781,16 +798,75 @@ create table if not exists transactions (
     created_at timestamptz not null default now()
 );
 
+create table if not exists parties (
+    id bigserial primary key,
+    household_id bigint not null default 1 references households(id) on delete cascade,
+    party_type text not null default 'organization' check (party_type in ('person','organization','bank','government','insurer','supplier','other')),
+    name text not null check (btrim(name) <> ''),
+    notes text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (household_id, id)
+);
+create index if not exists parties_household_name_idx on parties(household_id, lower(name));
+
+create table if not exists party_identifiers (
+    id bigserial primary key,
+    household_id bigint not null default 1 references households(id) on delete cascade,
+    party_id bigint not null references parties(id) on delete cascade,
+    identifier_type text not null check (identifier_type in ('iban','bic','creditor_id','vat_id','tax_id','customer_number','email','phone','other')),
+    identifier_value text not null check (btrim(identifier_value) <> ''),
+    normalized_value text not null check (btrim(normalized_value) <> ''),
+    created_at timestamptz not null default now(),
+    unique (household_id, identifier_type, normalized_value)
+);
+create index if not exists party_identifiers_party_idx on party_identifiers(party_id);
+
 alter table accounts add column if not exists household_id bigint not null default 1 references households(id) on delete cascade;
 alter table accounts add column if not exists opening_balance_cents bigint not null default 0;
 alter table categories add column if not exists household_id bigint not null default 1 references households(id) on delete cascade;
 alter table transactions add column if not exists counterparty_iban text;
+alter table transactions add column if not exists counterparty_party_id bigint references parties(id) on delete set null;
+alter table transactions add column if not exists counterparty_name_raw text;
+alter table transactions add column if not exists counterparty_iban_raw text;
 alter table transactions add column if not exists import_fingerprint text;
 alter table transactions add column if not exists hidden boolean not null default false;
+
+update transactions set counterparty_name_raw = counterparty where counterparty_name_raw is null and btrim(coalesce(counterparty, '')) <> '';
+update transactions set counterparty_iban_raw = counterparty_iban where counterparty_iban_raw is null and btrim(coalesce(counterparty_iban, '')) <> '';
+
+insert into parties (household_id, party_type, name)
+select distinct accounts.household_id, 'organization', btrim(transactions.counterparty_name_raw)
+from transactions
+join accounts on accounts.id = transactions.account_id
+where btrim(coalesce(transactions.counterparty_name_raw, '')) <> ''
+and not exists (
+    select 1 from parties
+    where parties.household_id = accounts.household_id
+    and lower(parties.name) = lower(btrim(transactions.counterparty_name_raw))
+);
+
+update transactions
+set counterparty_party_id = parties.id
+from accounts, parties
+where transactions.counterparty_party_id is null
+and accounts.id = transactions.account_id
+and btrim(coalesce(transactions.counterparty_name_raw, '')) <> ''
+and parties.household_id = accounts.household_id
+and lower(parties.name) = lower(btrim(transactions.counterparty_name_raw));
+
+insert into party_identifiers (household_id, party_id, identifier_type, identifier_value, normalized_value)
+select distinct accounts.household_id, transactions.counterparty_party_id, 'iban', btrim(transactions.counterparty_iban_raw), upper(replace(btrim(transactions.counterparty_iban_raw), ' ', ''))
+from transactions
+join accounts on accounts.id = transactions.account_id
+where transactions.counterparty_party_id is not null
+and btrim(coalesce(transactions.counterparty_iban_raw, '')) <> ''
+on conflict (household_id, identifier_type, normalized_value) do nothing;
 
 create index if not exists transactions_account_booked_on_idx on transactions(account_id, booked_on desc);
 create index if not exists transactions_category_idx on transactions(category_id);
 create unique index if not exists transactions_import_fingerprint_unique on transactions(import_fingerprint) where import_fingerprint is not null and import_fingerprint != '';
+create index if not exists transactions_counterparty_party_idx on transactions(counterparty_party_id, booked_on desc) where counterparty_party_id is not null;
 
 create table if not exists documents (
     id bigserial primary key,
@@ -801,10 +877,42 @@ create table if not exists documents (
     object_key text not null unique,
     document_date date,
     description text,
+	translation_text text,
+	translation_status text not null default 'not_requested' check (translation_status in ('not_requested', 'pending', 'completed', 'unsupported', 'failed')),
     created_at timestamptz not null default now()
 );
 
+alter table documents add column if not exists translation_text text;
+alter table documents add column if not exists translation_status text not null default 'not_requested';
+do $$ begin
+    if not exists (select 1 from pg_constraint where conname = 'documents_translation_status_check') then
+        alter table documents add constraint documents_translation_status_check
+            check (translation_status in ('not_requested', 'pending', 'completed', 'unsupported', 'failed'));
+    end if;
+end $$;
+
 create index if not exists documents_sha256_idx on documents(sha256);
+
+create table if not exists document_analyses (
+    id bigserial primary key,
+    document_id bigint not null references documents(id) on delete cascade,
+    analysis_type text not null check (analysis_type in ('translation','analysis')),
+    status text not null default 'pending' check (status in ('not_requested','pending','completed','unsupported','failed')),
+    language text,
+    model text,
+    content_text text,
+    content_json jsonb,
+    error_message text,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (document_id, analysis_type)
+);
+
+insert into document_analyses (document_id, analysis_type, status, language, content_text, created_at, updated_at)
+select id, 'translation', translation_status, 'nl', nullif(translation_text, ''), created_at, now()
+from documents
+where translation_status <> 'not_requested' or btrim(coalesce(translation_text, '')) <> ''
+on conflict (document_id, analysis_type) do nothing;
 
 create table if not exists document_links (
     document_id bigint not null references documents(id) on delete cascade,
@@ -852,7 +960,42 @@ create table if not exists liabilities (
     check (end_date is null or start_date is null or end_date >= start_date)
 );
 
+alter table liabilities add column if not exists creditor_party_id bigint references parties(id) on delete set null;
+
+insert into parties (household_id, party_type, name)
+select distinct liabilities.household_id, 'organization', btrim(liabilities.creditor)
+from liabilities
+where btrim(coalesce(liabilities.creditor, '')) <> ''
+and not exists (
+    select 1 from parties
+    where parties.household_id = liabilities.household_id
+    and lower(parties.name) = lower(btrim(liabilities.creditor))
+);
+
+update liabilities
+set creditor_party_id = parties.id
+from parties
+where liabilities.creditor_party_id is null
+and btrim(coalesce(liabilities.creditor, '')) <> ''
+and parties.household_id = liabilities.household_id
+and lower(parties.name) = lower(btrim(liabilities.creditor));
+
 create index if not exists liabilities_household_type_status_idx on liabilities(household_id, liability_type, status, name);
+create index if not exists liabilities_creditor_party_idx on liabilities(creditor_party_id) where creditor_party_id is not null;
+
+create table if not exists reservations (
+    id bigserial primary key,
+    household_id bigint not null default 1 references households(id) on delete cascade,
+    reserve_type text not null check (reserve_type in ('mortgage', 'loan', 'tax_debt', 'credit', 'other')),
+    name text not null check (btrim(name) <> ''),
+    description text,
+    due_date date,
+    amount bigint not null default 0 check (amount >= 0),
+    currency char(3) not null default 'EUR',
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+create index if not exists reservations_household_type_due_idx on reservations(household_id, reserve_type, due_date, name);
 
 create table if not exists cases (
     id bigserial primary key,
@@ -892,7 +1035,7 @@ where not exists (select 1 from cases where cases.main_category_id = main_catego
 
 create table if not exists domain_events (
     id bigserial primary key,
-    entity_type text not null check (entity_type in ('asset', 'liability', 'case')),
+    entity_type text not null check (entity_type in ('asset', 'liability', 'case', 'reservation')),
     entity_id bigint not null check (entity_id > 0),
     event_type text not null check (btrim(event_type) <> ''),
     event_date date not null,
@@ -901,20 +1044,68 @@ create table if not exists domain_events (
     related_entity_id bigint,
     created_at timestamptz not null default now(),
     check ((related_entity_type is null) = (related_entity_id is null)),
-    check (related_entity_type is null or related_entity_type in ('document', 'transaction', 'asset', 'liability', 'case')),
+    check (related_entity_type is null or related_entity_type in ('document', 'transaction', 'asset', 'liability', 'case', 'reservation')),
     check (related_entity_id is null or related_entity_id > 0),
     check (related_entity_type is null or entity_type <> related_entity_type or entity_id <> related_entity_id)
 );
 
+do $$
+declare constraint_name text;
+begin
+    for constraint_name in
+        select conname from pg_constraint
+        where conrelid = 'domain_events'::regclass
+        and contype = 'c'
+        and pg_get_constraintdef(oid) like '%entity_type%asset%liability%case%'
+        and pg_get_constraintdef(oid) not like '%reservation%'
+    loop
+        execute format('alter table domain_events drop constraint %I', constraint_name);
+    end loop;
+end $$;
+
+do $$ begin
+    if not exists (select 1 from pg_constraint where conrelid = 'domain_events'::regclass and conname = 'domain_events_entity_type_check') then
+        alter table domain_events add constraint domain_events_entity_type_check
+            check (entity_type in ('asset', 'liability', 'case', 'reservation'));
+    end if;
+end $$;
+
+do $$ begin
+    if not exists (select 1 from pg_constraint where conrelid = 'domain_events'::regclass and conname = 'domain_events_related_entity_type_check') then
+        alter table domain_events add constraint domain_events_related_entity_type_check
+            check (related_entity_type is null or related_entity_type in ('document', 'transaction', 'asset', 'liability', 'case', 'reservation'));
+    end if;
+end $$;
+
 create index if not exists domain_events_timeline_idx on domain_events(entity_type, entity_id, event_date desc, id desc);
+with duplicates as (
+    select id, row_number() over (partition by entity_type, entity_id, event_type order by id) as row_number
+    from domain_events
+    where event_type in ('asset_created', 'liability_created', 'case_created', 'reservation_created')
+)
+delete from domain_events using duplicates
+where domain_events.id = duplicates.id and duplicates.row_number > 1;
+do $$ begin
+    if exists (
+        select 1 from pg_indexes
+        where schemaname = current_schema()
+          and indexname = 'domain_events_creation_unique_idx'
+          and indexdef not like '%reservation_created%'
+    ) then
+        drop index domain_events_creation_unique_idx;
+    end if;
+end $$;
 create unique index if not exists domain_events_creation_unique_idx on domain_events(entity_type, entity_id)
-where event_type in ('asset_created', 'liability_created', 'case_created');
+where event_type in ('asset_created', 'liability_created', 'case_created', 'reservation_created');
 
 insert into domain_events (entity_type, entity_id, event_type, event_date, description, created_at)
 select 'asset', id, 'asset_created', (created_at at time zone 'UTC')::date, 'Bezitting aangemaakt', created_at from assets
 on conflict do nothing;
 insert into domain_events (entity_type, entity_id, event_type, event_date, description, created_at)
 select 'liability', id, 'liability_created', (created_at at time zone 'UTC')::date, 'Schuld aangemaakt', created_at from liabilities
+on conflict do nothing;
+insert into domain_events (entity_type, entity_id, event_type, event_date, description, created_at)
+select 'reservation', id, 'reservation_created', (created_at at time zone 'UTC')::date, 'Reservering aangemaakt', created_at from reservations
 on conflict do nothing;
 insert into domain_events (entity_type, entity_id, event_type, event_date, description, created_at)
 select 'case', id, 'case_created', (created_at at time zone 'UTC')::date, 'Dossier aangemaakt', created_at from cases
@@ -1049,4 +1240,9 @@ insert into schema_migrations (version) values ('006_liabilities') on conflict (
 insert into schema_migrations (version) values ('007_cases') on conflict (version) do nothing;
 insert into schema_migrations (version) values ('008_domain_events') on conflict (version) do nothing;
 insert into schema_migrations (version) values ('009_main_category_cases') on conflict (version) do nothing;
+insert into schema_migrations (version) values ('010_case_contract_fields') on conflict (version) do nothing;
+insert into schema_migrations (version) values ('011_reservations') on conflict (version) do nothing;
+insert into schema_migrations (version) values ('012_document_translations') on conflict (version) do nothing;
+insert into schema_migrations (version) values ('013_document_analyses_parties') on conflict (version) do nothing;
+insert into schema_migrations (version) values ('014_transaction_counterparties') on conflict (version) do nothing;
 `

@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"geldzaken/internal/config"
+	"hohoho/internal/config"
 )
 
 func registerConfigurationRoutes(mux *http.ServeMux, deps Dependencies) {

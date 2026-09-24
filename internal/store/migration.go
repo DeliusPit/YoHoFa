@@ -26,6 +26,9 @@ func MigrateSQLiteToPostgres(ctx context.Context, sqlitePath string, databaseURL
 	if err := sqliteDB.PingContext(ctx); err != nil {
 		return MigrationResult{}, err
 	}
+	if err := sqliteCoreMigrationSource(ctx, sqliteDB); err != nil {
+		return MigrationResult{}, err
+	}
 
 	postgres, err := OpenPostgres(ctx, databaseURL)
 	if err != nil {
@@ -150,6 +153,40 @@ func MigrateSQLiteToPostgres(ctx context.Context, sqlitePath string, databaseURL
 	}
 
 	return result, tx.Commit(ctx)
+}
+
+func sqliteCoreMigrationSource(ctx context.Context, db *sql.DB) error {
+	queries := []struct {
+		table string
+		query string
+	}{
+		{"assets", `select count(*) from assets`},
+		{"liabilities", `select count(*) from liabilities`},
+		{"reservations", `select count(*) from reservations`},
+		{"documents", `select count(*) from documents`},
+		{"document_links", `select count(*) from document_links`},
+		{"object_relations", `select count(*) from object_relations`},
+		{"entity_relations", `select count(*) from entity_relations`},
+		{"cases", `select count(*) from cases where main_category_id is null`},
+		{"domain_events", `select count(*) from domain_events where not (event_type='case_created' and entity_type='case' and exists(select 1 from cases where cases.id=domain_events.entity_id and cases.main_category_id is not null))`},
+	}
+	for _, check := range queries {
+		var exists int
+		if err := db.QueryRowContext(ctx, `select count(*) from sqlite_master where type = 'table' and name = ?`, check.table).Scan(&exists); err != nil {
+			return fmt.Errorf("inspect SQLite migration source: %w", err)
+		}
+		if exists == 0 {
+			continue
+		}
+		var count int
+		if err := db.QueryRowContext(ctx, check.query).Scan(&count); err != nil {
+			return fmt.Errorf("inspect SQLite migration source: %w", err)
+		}
+		if count > 0 {
+			return fmt.Errorf("migration refused: source contains domain data not supported by the core SQLite-to-PostgreSQL migration")
+		}
+	}
+	return nil
 }
 
 type pgTx interface {

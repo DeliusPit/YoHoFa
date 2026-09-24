@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"geldzaken/internal/store"
+	"hohoho/internal/store"
 )
 
 func registerCaseRoutes(mux *http.ServeMux, deps Dependencies) {

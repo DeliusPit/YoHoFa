@@ -306,10 +306,11 @@ func (s *Postgres) appendRelationDomainEvents(ctx context.Context, tx pgx.Tx, re
 func (s *Postgres) objectTransactions(ctx context.Context, objectType string, objectID int64) ([]Transaction, error) {
 	rows, err := s.pool.Query(ctx, `
 		select transactions.id, transactions.account_id, coalesce(transactions.category_id, 0), transactions.booked_on::text, transactions.description,
-			coalesce(transactions.counterparty, ''), coalesce(transactions.counterparty_iban, ''), transactions.amount_cents,
+			coalesce(parties.name, transactions.counterparty_name_raw, transactions.counterparty, ''), coalesce(transactions.counterparty_iban_raw, transactions.counterparty_iban, ''), transactions.amount_cents,
 			coalesce(transactions.external_reference, ''), coalesce(transactions.import_fingerprint, ''), transactions.hidden,
 			(select count(distinct source_id) from entity_relations where source_type = 'document' and target_type = 'transaction' and target_id = transactions.id and relation_type = 'evidence_for')
 		from transactions
+		left join parties on parties.id = transactions.counterparty_party_id
 		where exists (
 			select 1 from entity_relations
 			where target_type = $1 and target_id = transactions.id
@@ -401,7 +402,7 @@ func normalizeEntityRelation(input SaveEntityRelation) (SaveEntityRelation, any,
 		}
 	} else if input.RelationType == RelationTypeEvidenceFor {
 		if input.SourceType != ObjectTypeDocument ||
-			(input.TargetType != ObjectTypeAsset && input.TargetType != ObjectTypeTransaction && input.TargetType != ObjectTypeLiability && input.TargetType != ObjectTypeCase) {
+			(input.TargetType != ObjectTypeAsset && input.TargetType != ObjectTypeTransaction && input.TargetType != ObjectTypeLiability && input.TargetType != ObjectTypeCase && input.TargetType != ObjectTypeReservation) {
 			return SaveEntityRelation{}, nil, nil, fmt.Errorf("unsupported evidence_for relation")
 		}
 	} else if input.RelationType == RelationTypeFinancedBy {
@@ -440,6 +441,8 @@ func validateAndLockEntity(ctx context.Context, tx pgx.Tx, entityType string, en
 		err = tx.QueryRow(ctx, `select id from assets where id = $1 for key share`, entityID).Scan(&id)
 	case ObjectTypeLiability:
 		err = tx.QueryRow(ctx, `select id from liabilities where id = $1 for key share`, entityID).Scan(&id)
+	case ObjectTypeReservation:
+		err = tx.QueryRow(ctx, `select id from reservations where id = $1 for key share`, entityID).Scan(&id)
 	case ObjectTypeTransaction:
 		err = tx.QueryRow(ctx, `select id from transactions where id = $1 for key share`, entityID).Scan(&id)
 	case ObjectTypeDocument:
@@ -477,6 +480,8 @@ func (s *Postgres) entityLabel(ctx context.Context, entityType string, entityID 
 		err = s.pool.QueryRow(ctx, `select name from assets where id = $1`, entityID).Scan(&label)
 	case ObjectTypeLiability:
 		err = s.pool.QueryRow(ctx, `select name from liabilities where id = $1`, entityID).Scan(&label)
+	case ObjectTypeReservation:
+		err = s.pool.QueryRow(ctx, `select name from reservations where id = $1`, entityID).Scan(&label)
 	case ObjectTypeTransaction:
 		err = s.pool.QueryRow(ctx, `select booked_on::text || ' - ' || description from transactions where id = $1`, entityID).Scan(&label)
 	case ObjectTypeDocument:

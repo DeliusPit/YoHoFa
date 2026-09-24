@@ -56,13 +56,14 @@ type LiabilityRepository interface {
 
 func (s *Postgres) Liabilities(ctx context.Context, filter LiabilityFilter) ([]Liability, error) {
 	rows, err := s.pool.Query(ctx, `
-		select id, household_id, liability_type, name, coalesce(description, ''), coalesce(creditor, ''),
+		select liabilities.id, liabilities.household_id, liability_type, liabilities.name, coalesce(description, ''), coalesce(parties.name, creditor, ''),
 			coalesce(to_char(start_date, 'YYYY-MM-DD'), ''), coalesce(to_char(end_date, 'YYYY-MM-DD'), ''),
-			original_amount, current_balance, currency, status, created_at::text, updated_at::text
+			original_amount, current_balance, currency, status, liabilities.created_at::text, liabilities.updated_at::text
 		from liabilities
+		left join parties on parties.id = liabilities.creditor_party_id
 		where ($1::text = '' or liability_type = $1)
 		and ($2::text = '' or status = $2)
-		order by status, name, id
+		order by status, liabilities.name, liabilities.id
 	`, filter.LiabilityType, filter.Status)
 	if err != nil {
 		return nil, err
@@ -82,10 +83,12 @@ func (s *Postgres) Liabilities(ctx context.Context, filter LiabilityFilter) ([]L
 func (s *Postgres) Liability(ctx context.Context, id int64) (Liability, error) {
 	var item Liability
 	err := scanLiability(s.pool.QueryRow(ctx, `
-		select id, household_id, liability_type, name, coalesce(description, ''), coalesce(creditor, ''),
+		select liabilities.id, liabilities.household_id, liability_type, liabilities.name, coalesce(description, ''), coalesce(parties.name, creditor, ''),
 			coalesce(to_char(start_date, 'YYYY-MM-DD'), ''), coalesce(to_char(end_date, 'YYYY-MM-DD'), ''),
-			original_amount, current_balance, currency, status, created_at::text, updated_at::text
-		from liabilities where id = $1
+			original_amount, current_balance, currency, status, liabilities.created_at::text, liabilities.updated_at::text
+		from liabilities
+		left join parties on parties.id = liabilities.creditor_party_id
+		where liabilities.id = $1
 	`, id), &item)
 	if err == pgx.ErrNoRows {
 		return Liability{}, fmt.Errorf("liability not found")
@@ -103,14 +106,18 @@ func (s *Postgres) CreateLiability(ctx context.Context, input SaveLiability) (Li
 		return Liability{}, err
 	}
 	defer tx.Rollback(ctx)
+	creditorPartyID, err := ensurePostgresParty(ctx, tx, input.Creditor)
+	if err != nil {
+		return Liability{}, err
+	}
 	var item Liability
 	err = scanLiability(tx.QueryRow(ctx, `
-		insert into liabilities (household_id, liability_type, name, description, creditor, start_date, end_date, original_amount, current_balance, currency, status)
-		values ((select id from households order by id limit 1), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		insert into liabilities (household_id, liability_type, name, description, creditor, creditor_party_id, start_date, end_date, original_amount, current_balance, currency, status)
+		values ((select id from households order by id limit 1), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		returning id, household_id, liability_type, name, coalesce(description, ''), coalesce(creditor, ''),
 			coalesce(to_char(start_date, 'YYYY-MM-DD'), ''), coalesce(to_char(end_date, 'YYYY-MM-DD'), ''),
 			original_amount, current_balance, currency, status, created_at::text, updated_at::text
-	`, input.LiabilityType, input.Name, input.Description, input.Creditor, startDate, endDate,
+	`, input.LiabilityType, input.Name, input.Description, input.Creditor, nullableInt64Value(creditorPartyID), startDate, endDate,
 		input.OriginalAmountCents, input.CurrentBalanceCents, input.Currency, input.Status), &item)
 	if err != nil {
 		return Liability{}, err
@@ -134,6 +141,10 @@ func (s *Postgres) UpdateLiability(ctx context.Context, id int64, input SaveLiab
 		return Liability{}, err
 	}
 	defer tx.Rollback(ctx)
+	creditorPartyID, err := ensurePostgresParty(ctx, tx, input.Creditor)
+	if err != nil {
+		return Liability{}, err
+	}
 	var oldStatus string
 	if err := tx.QueryRow(ctx, `select status from liabilities where id = $1 for update`, id).Scan(&oldStatus); err == pgx.ErrNoRows {
 		return Liability{}, fmt.Errorf("liability not found")
@@ -143,13 +154,13 @@ func (s *Postgres) UpdateLiability(ctx context.Context, id int64, input SaveLiab
 	var item Liability
 	err = scanLiability(tx.QueryRow(ctx, `
 		update liabilities
-		set liability_type = $1, name = $2, description = $3, creditor = $4, start_date = $5, end_date = $6,
-			original_amount = $7, current_balance = $8, currency = $9, status = $10, updated_at = now()
-		where id = $11
+		set liability_type = $1, name = $2, description = $3, creditor = $4, creditor_party_id = $5, start_date = $6, end_date = $7,
+			original_amount = $8, current_balance = $9, currency = $10, status = $11, updated_at = now()
+		where id = $12
 		returning id, household_id, liability_type, name, coalesce(description, ''), coalesce(creditor, ''),
 			coalesce(to_char(start_date, 'YYYY-MM-DD'), ''), coalesce(to_char(end_date, 'YYYY-MM-DD'), ''),
 			original_amount, current_balance, currency, status, created_at::text, updated_at::text
-	`, input.LiabilityType, input.Name, input.Description, input.Creditor, startDate, endDate,
+	`, input.LiabilityType, input.Name, input.Description, input.Creditor, nullableInt64Value(creditorPartyID), startDate, endDate,
 		input.OriginalAmountCents, input.CurrentBalanceCents, input.Currency, input.Status, id), &item)
 	if err == pgx.ErrNoRows {
 		return Liability{}, fmt.Errorf("liability not found")
@@ -215,6 +226,37 @@ func scanLiability(scanner liabilityScanner, item *Liability) error {
 	return scanner.Scan(&item.ID, &item.HouseholdID, &item.LiabilityType, &item.Name, &item.Description, &item.Creditor,
 		&item.StartDate, &item.EndDate, &item.OriginalAmountCents, &item.CurrentBalanceCents, &item.Currency, &item.Status,
 		&item.CreatedAt, &item.UpdatedAt)
+}
+
+func ensurePostgresParty(ctx context.Context, tx pgx.Tx, name string) (int64, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0, nil
+	}
+	var id int64
+	err := tx.QueryRow(ctx, `
+		select id from parties
+		where household_id = (select id from households order by id limit 1)
+		and lower(name) = lower($1)
+		order by id limit 1
+	`, name).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if err != pgx.ErrNoRows {
+		return 0, err
+	}
+	if err := tx.QueryRow(ctx, `insert into parties (household_id, party_type, name) values ((select id from households order by id limit 1), 'organization', $1) returning id`, name).Scan(&id); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func nullableInt64Value(value int64) any {
+	if value == 0 {
+		return nil
+	}
+	return value
 }
 
 func normalizeLiabilityInput(input SaveLiability) (SaveLiability, any, any, error) {

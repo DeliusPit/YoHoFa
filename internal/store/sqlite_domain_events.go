@@ -88,6 +88,8 @@ func sqliteValidateDomainEventOwner(ctx context.Context, query sqliteQueryRower,
 		table = "liabilities"
 	case ObjectTypeCase:
 		table = "cases"
+	case ObjectTypeReservation:
+		table = "reservations"
 	default:
 		return fmt.Errorf("invalid domain event entity")
 	}
@@ -126,6 +128,8 @@ func (s *SQLite) sqliteEntityLabel(ctx context.Context, entityType string, entit
 		err = s.db.QueryRowContext(ctx, `select original_filename from documents where id = ?`, entityID).Scan(&label)
 	case ObjectTypeCase:
 		err = s.db.QueryRowContext(ctx, `select title from cases where id = ?`, entityID).Scan(&label)
+	case ObjectTypeReservation:
+		err = s.db.QueryRowContext(ctx, `select name from reservations where id = ?`, entityID).Scan(&label)
 	default:
 		return fmt.Sprintf("%s #%d", entityType, entityID), nil
 	}

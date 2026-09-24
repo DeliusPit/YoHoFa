@@ -12,7 +12,7 @@ import (
 )
 
 func TestNormalizeMySQLDSN(t *testing.T) {
-	got, err := normalizeMySQLDSN("user:secret@tcp(localhost:3306)/geldzaken?timeout=3s")
+	got, err := normalizeMySQLDSN("user:secret@tcp(localhost:3306)/hohoho?timeout=3s")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestMySQLSchemaDeclarations(t *testing.T) {
 		versions[migration.version] = true
 		joined += strings.Join(migration.statements, "\n")
 	}
-	for _, table := range []string{"households", "accounts", "main_categories", "categories", "transactions", "documents", "assets", "asset_valuations", "liabilities", "cases", "entity_relations", "domain_events"} {
+	for _, table := range []string{"households", "accounts", "main_categories", "categories", "transactions", "documents", "assets", "asset_valuations", "liabilities", "reservations", "cases", "entity_relations", "domain_events"} {
 		if !strings.Contains(joined, "create table if not exists "+table) {
 			t.Errorf("schema does not declare %s", table)
 		}
@@ -85,8 +85,22 @@ func TestMySQLSchemaDeclarations(t *testing.T) {
 			t.Errorf("schema does not contain %q", required)
 		}
 	}
+	if !strings.Contains(joined, "'reservation_created'") {
+		t.Fatal("schema does not enforce a unique reservation creation event")
+	}
 	if strings.Contains(joined, "insert ignore") {
 		t.Fatal("schema uses broad INSERT IGNORE")
+	}
+}
+
+func TestMySQLMigrationStatementAlreadyApplied(t *testing.T) {
+	for _, number := range []uint16{1060, 1061, 1826, 3822} {
+		if !mysqlMigrationStatementAlreadyApplied(&drivermysql.MySQLError{Number: number}) {
+			t.Errorf("MySQL error %d should be recoverable", number)
+		}
+	}
+	if mysqlMigrationStatementAlreadyApplied(&drivermysql.MySQLError{Number: 1064}) {
+		t.Fatal("syntax errors must not be treated as applied migrations")
 	}
 }
 

@@ -3,7 +3,7 @@
 Bankgegevens importeren bestaat meestal uit twee stappen.
 
 1. In de bankomgeving exporteer je transacties als CSV of, voor ICS, als PDF-afschrift.
-2. In Geldzaken upload je het bestand en controleer je eerst een preview voordat gegevens worden opgeslagen.
+2. In HoHoHo upload je het bestand en controleer je eerst een preview voordat gegevens worden opgeslagen.
 
 De applicatie ondersteunt preview, definitieve import en duplicate-detectie.
 

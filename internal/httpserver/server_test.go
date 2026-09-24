@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"geldzaken/internal/bankimport"
-	"geldzaken/internal/config"
-	"geldzaken/internal/store"
+	"hohoho/internal/bankimport"
+	"hohoho/internal/config"
+	"hohoho/internal/store"
 )
 
 func TestImportedTransactionsKeepsRepeatedTransactionsDistinct(t *testing.T) {
@@ -100,7 +100,7 @@ func TestConfigurationPUTIsStrictAndDoesNotLeakSecrets(t *testing.T) {
 
 func TestConfigurationPUTRejectsEnvironmentOwnedConfiguration(t *testing.T) {
 	clearStorageEnvironment(t)
-	t.Setenv("MINIO_ENDPOINT", "environment-owned:9000")
+	t.Setenv("S3_ENDPOINT", "environment-owned:9000")
 	cfg := configurationTestConfig(t)
 	cfg.ConfigEditable = true
 	manager, err := config.NewManager(cfg)
@@ -149,13 +149,13 @@ func configurationTestConfig(t *testing.T) config.Config {
 
 func clearStorageEnvironment(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"STORAGE_PROFILE", "DATABASE_BACKEND", "STORE_BACKEND", "DATABASE_URL", "DATABASE_PATH", "OBJECT_BACKEND", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET", "S3_USE_TLS", "S3_REGION", "S3_PATH_STYLE", "S3_CREATE_BUCKET", "MINIO_ENDPOINT", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY", "MINIO_BUCKET", "MINIO_USE_SSL"} {
+	for _, key := range []string{"STORAGE_PROFILE", "DATABASE_BACKEND", "STORE_BACKEND", "DATABASE_URL", "DATABASE_PATH", "OBJECT_BACKEND", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET", "S3_USE_TLS", "S3_REGION", "S3_PATH_STYLE", "S3_CREATE_BUCKET", "LLM_ENDPOINT", "LLM_DOCUMENT_METADATA", "LLM_TRANSACTION_CLASSIFY"} {
 		t.Setenv(key, "")
 	}
 }
 
 func validConfigurationJSON() string {
-	return `{"profile":"central","database":{"backend":"postgres","host":"new-db","port":5432,"name":"money","user":"money","sslMode":"require"},"objects":{"backend":"s3","endpoint":"new-s3:3900","bucket":"documents","useTLS":false,"region":"garage","pathStyle":true,"createBucket":false}}`
+	return `{"profile":"central","database":{"backend":"postgres","host":"new-db","port":5432,"name":"money","user":"money","sslMode":"require"},"objects":{"backend":"s3","endpoint":"new-s3:3900","bucket":"documents","useTLS":false,"region":"garage","pathStyle":true,"createBucket":false},"llm":{"endpoint":"http://192.168.178.215:8080","documentMetadata":true,"transactionClassify":true}}`
 }
 
 func TestBasicAuthProtectsAPI(t *testing.T) {

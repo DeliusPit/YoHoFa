@@ -16,11 +16,12 @@ import (
 	"strconv"
 	"strings"
 
-	"geldzaken/internal/bankimport"
-	"geldzaken/internal/config"
-	"geldzaken/internal/objectstore"
-	"geldzaken/internal/store"
-	"geldzaken/internal/systembackup"
+	"hohoho/internal/bankimport"
+	"hohoho/internal/config"
+	"hohoho/internal/documenttranslation"
+	"hohoho/internal/objectstore"
+	"hohoho/internal/store"
+	"hohoho/internal/systembackup"
 )
 
 type Dependencies struct {
@@ -29,6 +30,7 @@ type Dependencies struct {
 	Documents           store.DocumentRepository
 	Assets              store.AssetRepository
 	Liabilities         store.LiabilityRepository
+	Reservations        store.ReservationRepository
 	Cases               store.CaseRepository
 	Relations           store.EntityRelationRepository
 	Events              store.DomainEventRepository
@@ -36,6 +38,7 @@ type Dependencies struct {
 	ObjectStoreRequired bool
 	Configuration       *config.Manager
 	SystemBackup        *systembackup.Service
+	DocumentTranslation *documenttranslation.Service
 	Logger              *slog.Logger
 }
 
@@ -95,6 +98,20 @@ func New(deps Dependencies) http.Handler {
 		}
 		mux.HandleFunc("/api/v1/liabilities", unavailable)
 		mux.HandleFunc("/api/v1/liabilities/", unavailable)
+	}
+	if deps.Reservations != nil {
+		registerReservationRoutes(mux, deps)
+		if documentsAvailable {
+			registerReservationDocumentRoutes(mux, deps)
+		} else {
+			registerUnavailableObjectDocumentRoutes(mux, "reservations")
+		}
+	} else {
+		unavailable := func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "reservations_require_postgres"})
+		}
+		mux.HandleFunc("/api/v1/reservations", unavailable)
+		mux.HandleFunc("/api/v1/reservations/", unavailable)
 	}
 	if deps.Cases != nil && deps.Relations != nil {
 		registerCaseRoutes(mux, deps)
@@ -527,7 +544,7 @@ func New(deps Dependencies) http.Handler {
 
 func registerUnavailableDocumentRoutes(mux *http.ServeMux) {
 	unavailable := func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "documents_require_postgres_and_minio"})
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "documents_require_relational_store_and_object_storage"})
 	}
 	mux.HandleFunc("GET /api/v1/documents", unavailable)
 	mux.HandleFunc("POST /api/v1/documents", unavailable)
@@ -539,7 +556,7 @@ func registerUnavailableDocumentRoutes(mux *http.ServeMux) {
 
 func registerUnavailableObjectDocumentRoutes(mux *http.ServeMux, objectPath string) {
 	unavailable := func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "documents_require_postgres_and_minio"})
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "documents_require_relational_store_and_object_storage"})
 	}
 	mux.HandleFunc("GET /api/v1/"+objectPath+"/{id}/documents", unavailable)
 	mux.HandleFunc("POST /api/v1/"+objectPath+"/{id}/documents", unavailable)
@@ -552,7 +569,7 @@ func basicAuth(username string, password string, next http.Handler) http.Handler
 		usernameMatches := subtle.ConstantTimeCompare([]byte(providedUsername), []byte(username)) == 1
 		passwordMatches := subtle.ConstantTimeCompare([]byte(providedPassword), []byte(password)) == 1
 		if !ok || !usernameMatches || !passwordMatches {
-			w.Header().Set("WWW-Authenticate", `Basic realm="Geldzaken", charset="UTF-8"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="HoHoHo", charset="UTF-8"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}

@@ -330,7 +330,11 @@ func (s *MySQL) ImportTransactions(ctx context.Context, accountID int64, transac
 			occurrences[base]++
 			fingerprint = transactionFingerprintOccurrence(base, occurrences[base])
 		}
-		_, err = tx.ExecContext(ctx, `insert into transactions(account_id,booked_on,description,counterparty,counterparty_iban,amount_cents,external_reference,import_fingerprint) values (?,?,?,?,?,?,?,?)`, accountID, v.BookedOn, v.Description, v.Counterparty, v.CounterpartyIBAN, v.AmountCents, v.ExternalReference, fingerprint)
+		partyID, err := ensureSQLPartyForTransaction(ctx, tx, accountID, v.Counterparty, v.CounterpartyIBAN, "mysql")
+		if err != nil {
+			return ImportResult{}, err
+		}
+		_, err = tx.ExecContext(ctx, `insert into transactions(account_id,booked_on,description,counterparty,counterparty_iban,counterparty_party_id,counterparty_name_raw,counterparty_iban_raw,amount_cents,external_reference,import_fingerprint) values (?,?,?,?,?,?,?,?,?,?,?)`, accountID, v.BookedOn, v.Description, v.Counterparty, v.CounterpartyIBAN, nullableInt64Value(partyID), v.Counterparty, v.CounterpartyIBAN, v.AmountCents, v.ExternalReference, fingerprint)
 		if mysqlDuplicate(err) {
 			out.Duplicates++
 			continue
@@ -345,7 +349,7 @@ func (s *MySQL) ImportTransactions(ctx context.Context, accountID int64, transac
 
 func mysqlTransactionWhere(filter TransactionFilter) (string, []any) {
 	search := strings.TrimSpace(filter.Search)
-	where := ` where (?=0 or transactions.account_id=?) and (?=0 or transactions.category_id=?) and (?=0 or categories.main_category_id=?) and (?='' or booked_on>=?) and (?='' or booked_on<=?) and (?='' or lower(transactions.description) like concat('%',lower(?),'%') or lower(coalesce(transactions.counterparty,'')) like concat('%',lower(?),'%') or lower(coalesce(transactions.counterparty_iban,'')) like concat('%',lower(?),'%') or lower(coalesce(transactions.external_reference,'')) like concat('%',lower(?),'%')) and (?=false or transactions.category_id is null) and ((?=true and transactions.hidden=true) or (?=false and transactions.hidden=false))`
+	where := ` where (?=0 or transactions.account_id=?) and (?=0 or transactions.category_id=?) and (?=0 or categories.main_category_id=?) and (?='' or booked_on>=?) and (?='' or booked_on<=?) and (?='' or lower(transactions.description) like concat('%',lower(?),'%') or lower(coalesce(parties.name,transactions.counterparty_name_raw,transactions.counterparty,'')) like concat('%',lower(?),'%') or lower(coalesce(transactions.counterparty_iban_raw,transactions.counterparty_iban,'')) like concat('%',lower(?),'%') or lower(coalesce(transactions.external_reference,'')) like concat('%',lower(?),'%')) and (?=false or transactions.category_id is null) and ((?=true and transactions.hidden=true) or (?=false and transactions.hidden=false))`
 	return where, []any{filter.AccountID, filter.AccountID, filter.CategoryID, filter.CategoryID, filter.MainCategoryID, filter.MainCategoryID, filter.From, filter.From, filter.To, filter.To, search, search, search, search, search, filter.Uncategorized, filter.HiddenOnly, filter.HiddenOnly}
 }
 
@@ -393,7 +397,7 @@ func (s *MySQL) Transactions(ctx context.Context, filter TransactionFilter) ([]T
 	}
 	where, args := mysqlTransactionWhere(filter)
 	args = append(args, filter.Limit, filter.Offset)
-	rows, err := s.db.QueryContext(ctx, `select transactions.id,transactions.account_id,coalesce(transactions.category_id,0),date_format(transactions.booked_on,'%Y-%m-%d'),transactions.description,coalesce(transactions.counterparty,''),coalesce(transactions.counterparty_iban,''),transactions.amount_cents,coalesce(transactions.external_reference,''),coalesce(transactions.import_fingerprint,''),transactions.hidden,(select count(distinct source_id) from entity_relations where source_type='document' and target_type='transaction' and target_id=transactions.id and relation_type='evidence_for') from transactions left join categories on categories.id=transactions.category_id`+where+` order by transactions.booked_on desc,transactions.id desc limit ? offset ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `select transactions.id,transactions.account_id,coalesce(transactions.category_id,0),date_format(transactions.booked_on,'%Y-%m-%d'),transactions.description,coalesce(parties.name,transactions.counterparty_name_raw,transactions.counterparty,''),coalesce(transactions.counterparty_iban_raw,transactions.counterparty_iban,''),transactions.amount_cents,coalesce(transactions.external_reference,''),coalesce(transactions.import_fingerprint,''),transactions.hidden,(select count(distinct source_id) from entity_relations where source_type='document' and target_type='transaction' and target_id=transactions.id and relation_type='evidence_for') from transactions left join categories on categories.id=transactions.category_id left join parties on parties.id=transactions.counterparty_party_id`+where+` order by transactions.booked_on desc,transactions.id desc limit ? offset ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -436,7 +440,7 @@ func (s *MySQL) TransactionSummary(ctx context.Context, filter TransactionFilter
 	}
 	where, args := mysqlTransactionWhere(filter)
 	var v TransactionSummary
-	err := s.db.QueryRowContext(ctx, `select count(*),coalesce(sum(transactions.amount_cents),0) from transactions left join categories on categories.id=transactions.category_id`+where, args...).Scan(&v.Count, &v.AmountCents)
+	err := s.db.QueryRowContext(ctx, `select count(*),coalesce(sum(transactions.amount_cents),0) from transactions left join categories on categories.id=transactions.category_id left join parties on parties.id=transactions.counterparty_party_id`+where, args...).Scan(&v.Count, &v.AmountCents)
 	return v, err
 }
 
@@ -460,13 +464,17 @@ func (s *MySQL) CategorizeTransaction(ctx context.Context, id int64, input Categ
 		}
 		return CategorizeResult{Updated: int(n)}, nil
 	}
-	var accountID int64
+	var accountID, partyID int64
 	var counterparty string
-	if err := s.db.QueryRowContext(ctx, `select account_id,coalesce(counterparty,'') from transactions where id=?`, id).Scan(&accountID, &counterparty); err != nil {
+	if err := s.db.QueryRowContext(ctx, `select account_id,coalesce(counterparty_party_id,0),coalesce(counterparty_name_raw,counterparty,'') from transactions where id=?`, id).Scan(&accountID, &partyID, &counterparty); err != nil {
 		return CategorizeResult{}, fmt.Errorf("transaction not found")
 	}
-	query := `update transactions set category_id=? where account_id=? and counterparty=? and category_id is null`
-	args := []any{input.CategoryID, accountID, counterparty}
+	query := `update transactions set category_id=? where account_id=? and counterparty_party_id=? and category_id is null`
+	args := []any{input.CategoryID, accountID, partyID}
+	if partyID == 0 {
+		query = `update transactions set category_id=? where account_id=? and coalesce(counterparty_name_raw,counterparty)=? and category_id is null`
+		args = []any{input.CategoryID, accountID, counterparty}
+	}
 	if strings.TrimSpace(counterparty) == "" {
 		query = `update transactions set category_id=? where id=?`
 		args = []any{input.CategoryID, id}

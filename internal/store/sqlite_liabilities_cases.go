@@ -10,7 +10,7 @@ import (
 func (s *SQLite) Liabilities(ctx context.Context, filter LiabilityFilter) ([]Liability, error) {
 	rows, err := s.db.QueryContext(ctx, sqliteLiabilitySelect+`
 		where (? = '' or liability_type = ?) and (? = '' or status = ?)
-		order by status, name, id
+		order by status, liabilities.name, liabilities.id
 	`, filter.LiabilityType, filter.LiabilityType, filter.Status, filter.Status)
 	if err != nil {
 		return nil, err
@@ -29,7 +29,7 @@ func (s *SQLite) Liabilities(ctx context.Context, filter LiabilityFilter) ([]Lia
 
 func (s *SQLite) Liability(ctx context.Context, id int64) (Liability, error) {
 	var item Liability
-	err := scanLiability(s.db.QueryRowContext(ctx, sqliteLiabilitySelect+` where id = ?`, id), &item)
+	err := scanLiability(s.db.QueryRowContext(ctx, sqliteLiabilitySelect+` where liabilities.id = ?`, id), &item)
 	if err == sql.ErrNoRows {
 		return Liability{}, fmt.Errorf("liability not found")
 	}
@@ -46,10 +46,14 @@ func (s *SQLite) CreateLiability(ctx context.Context, input SaveLiability) (Liab
 		return Liability{}, err
 	}
 	defer tx.Rollback()
+	creditorPartyID, err := ensureSQLPartyByName(ctx, tx, input.Creditor)
+	if err != nil {
+		return Liability{}, err
+	}
 	result, err := tx.ExecContext(ctx, `
-		insert into liabilities (household_id, liability_type, name, description, creditor, start_date, end_date, original_amount, current_balance, currency, status)
-		values ((select id from households order by id limit 1), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, input.LiabilityType, input.Name, input.Description, input.Creditor, sqliteOptionalDate(input.StartDate), sqliteOptionalDate(input.EndDate),
+		insert into liabilities (household_id, liability_type, name, description, creditor, creditor_party_id, start_date, end_date, original_amount, current_balance, currency, status)
+		values ((select id from households order by id limit 1), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, input.LiabilityType, input.Name, input.Description, input.Creditor, nullableInt64Value(creditorPartyID), sqliteOptionalDate(input.StartDate), sqliteOptionalDate(input.EndDate),
 		input.OriginalAmountCents, input.CurrentBalanceCents, input.Currency, input.Status)
 	if err != nil {
 		return Liability{}, err
@@ -59,7 +63,7 @@ func (s *SQLite) CreateLiability(ctx context.Context, input SaveLiability) (Liab
 		return Liability{}, err
 	}
 	var item Liability
-	if err := scanLiability(tx.QueryRowContext(ctx, sqliteLiabilitySelect+` where id = ?`, id), &item); err != nil {
+	if err := scanLiability(tx.QueryRowContext(ctx, sqliteLiabilitySelect+` where liabilities.id = ?`, id), &item); err != nil {
 		return Liability{}, err
 	}
 	if err := appendSQLiteDomainEvent(ctx, tx, AppendDomainEvent{EntityType: ObjectTypeLiability, EntityID: id, EventType: "liability_created", CurrentDate: true, Description: "Schuld aangemaakt"}); err != nil {
@@ -81,6 +85,10 @@ func (s *SQLite) UpdateLiability(ctx context.Context, id int64, input SaveLiabil
 		return Liability{}, err
 	}
 	defer tx.Rollback()
+	creditorPartyID, err := ensureSQLPartyByName(ctx, tx, input.Creditor)
+	if err != nil {
+		return Liability{}, err
+	}
 	var oldStatus string
 	if err := tx.QueryRowContext(ctx, `select status from liabilities where id = ?`, id).Scan(&oldStatus); err == sql.ErrNoRows {
 		return Liability{}, fmt.Errorf("liability not found")
@@ -88,16 +96,16 @@ func (s *SQLite) UpdateLiability(ctx context.Context, id int64, input SaveLiabil
 		return Liability{}, err
 	}
 	_, err = tx.ExecContext(ctx, `
-		update liabilities set liability_type = ?, name = ?, description = ?, creditor = ?, start_date = ?, end_date = ?,
+		update liabilities set liability_type = ?, name = ?, description = ?, creditor = ?, creditor_party_id = ?, start_date = ?, end_date = ?,
 			original_amount = ?, current_balance = ?, currency = ?, status = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 		where id = ?
-	`, input.LiabilityType, input.Name, input.Description, input.Creditor, sqliteOptionalDate(input.StartDate), sqliteOptionalDate(input.EndDate),
+	`, input.LiabilityType, input.Name, input.Description, input.Creditor, nullableInt64Value(creditorPartyID), sqliteOptionalDate(input.StartDate), sqliteOptionalDate(input.EndDate),
 		input.OriginalAmountCents, input.CurrentBalanceCents, input.Currency, input.Status, id)
 	if err != nil {
 		return Liability{}, err
 	}
 	var item Liability
-	if err := scanLiability(tx.QueryRowContext(ctx, sqliteLiabilitySelect+` where id = ?`, id), &item); err != nil {
+	if err := scanLiability(tx.QueryRowContext(ctx, sqliteLiabilitySelect+` where liabilities.id = ?`, id), &item); err != nil {
 		return Liability{}, err
 	}
 	eventType, description := "liability_updated", "Schuld bijgewerkt"
@@ -242,6 +250,8 @@ func (s *SQLite) sqliteDeleteDomainObject(ctx context.Context, objectType string
 		table = "liabilities"
 	case ObjectTypeCase:
 		table = "cases"
+	case ObjectTypeReservation:
+		table = "reservations"
 	default:
 		return fmt.Errorf("unsupported object type")
 	}
@@ -289,9 +299,10 @@ func (s *SQLite) sqliteDeleteDomainObject(ctx context.Context, objectType string
 }
 
 const sqliteLiabilitySelect = `
-	select id, household_id, liability_type, name, coalesce(description, ''), coalesce(creditor, ''),
-		coalesce(start_date, ''), coalesce(end_date, ''), original_amount, current_balance, currency, status, created_at, updated_at
-	from liabilities`
+	select liabilities.id, liabilities.household_id, liability_type, liabilities.name, coalesce(description, ''), coalesce(parties.name, creditor, ''),
+		coalesce(start_date, ''), coalesce(end_date, ''), original_amount, current_balance, currency, status, liabilities.created_at, liabilities.updated_at
+	from liabilities
+	left join parties on parties.id = liabilities.creditor_party_id`
 
 const sqliteCaseSelect = `
 	select id, household_id, coalesce(main_category_id, 0), case_type, title, coalesce(description, ''), coalesce(start_date, ''), coalesce(end_date, ''), coalesce(term_months, 0),

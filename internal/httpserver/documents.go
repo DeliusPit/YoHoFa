@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"geldzaken/internal/store"
+	"hohoho/internal/store"
 )
 
 const maxDocumentSize = 25 << 20
@@ -93,6 +93,10 @@ func registerDocumentRoutes(mux *http.ServeMux, deps Dependencies) {
 			deps.Logger.Error("store document metadata", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "metadata_storage_failed"})
 			return
+		}
+		if deps.Config.LLMDocumentMetadata && deps.DocumentTranslation != nil {
+			deps.DocumentTranslation.Start(document.ID)
+			document.TranslationStatus = "pending"
 		}
 		writeJSON(w, http.StatusCreated, document)
 	})

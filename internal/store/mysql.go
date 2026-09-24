@@ -19,6 +19,7 @@ var (
 	_ DocumentRepository       = (*MySQL)(nil)
 	_ AssetRepository          = (*MySQL)(nil)
 	_ LiabilityRepository      = (*MySQL)(nil)
+	_ ReservationRepository    = (*MySQL)(nil)
 	_ CaseRepository           = (*MySQL)(nil)
 	_ EntityRelationRepository = (*MySQL)(nil)
 	_ DomainEventRepository    = (*MySQL)(nil)
@@ -79,13 +80,13 @@ func (s *MySQL) ensureSchema(ctx context.Context) error {
 	}
 	defer conn.Close()
 	var acquired int
-	if err := conn.QueryRowContext(ctx, `select get_lock('geldzaken_mysql_schema', 30)`).Scan(&acquired); err != nil {
+	if err := conn.QueryRowContext(ctx, `select get_lock('hohoho_mysql_schema', 30)`).Scan(&acquired); err != nil {
 		return err
 	}
 	if acquired != 1 {
 		return fmt.Errorf("could not acquire schema migration lock")
 	}
-	defer conn.ExecContext(context.Background(), `select release_lock('geldzaken_mysql_schema')`)
+	defer conn.ExecContext(context.Background(), `select release_lock('hohoho_mysql_schema')`)
 	if _, err := conn.ExecContext(ctx, `create table if not exists schema_migrations (
 		version varchar(128) not null primary key, applied_at datetime(6) not null default current_timestamp(6)
 	) engine=InnoDB default charset=utf8mb4 collate=utf8mb4_0900_as_cs`); err != nil {
@@ -101,6 +102,9 @@ func (s *MySQL) ensureSchema(ctx context.Context) error {
 		}
 		for _, statement := range migration.statements {
 			if _, err := conn.ExecContext(ctx, statement); err != nil {
+				if mysqlMigrationStatementAlreadyApplied(err) {
+					continue
+				}
 				return fmt.Errorf("migration %s: %w", migration.version, err)
 			}
 		}
@@ -112,6 +116,21 @@ func (s *MySQL) ensureSchema(ctx context.Context) error {
 		return fmt.Errorf("seed defaults: %w", err)
 	}
 	return nil
+}
+
+func mysqlMigrationStatementAlreadyApplied(err error) bool {
+	var mysqlErr *drivermysql.MySQLError
+	if !errors.As(err, &mysqlErr) {
+		return false
+	}
+	// MySQL commits DDL implicitly. Re-running a migration must tolerate a
+	// column, index, or constraint that was committed before a later failure.
+	switch mysqlErr.Number {
+	case 1060, 1061, 1826, 3822:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *MySQL) seedDefaults(ctx context.Context, conn *sql.Conn) error {
