@@ -6,6 +6,7 @@ Deze directory bevat de ontwerp- en technische documentatie voor HoHoHo, de huis
 
 - [Functioneel ontwerp](functional-design.md): beschrijft alle gebruikersfuncties, schermen, domeinen en gewenste werking.
 - [Technisch ontwerp](technical-design.md): beschrijft architectuur, lagen, stores, objectopslag, configuratie, migraties en betrouwbaarheid.
+- [Datamodel](data-model.md): beschrijft het totale relationele model, relaties, invarianten en compatibiliteitslagen.
 - [API-overzicht](api-reference.md): beschrijft de HTTP API per functiegroep.
 - [AI bij bankimport](ai-bankimport.md): ontwerp voor AI-ondersteunde transactiecategorisatie.
 - [Bankimport](bankimport.md): bestaande importprofielen en gebruik.
