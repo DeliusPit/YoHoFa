@@ -28,6 +28,10 @@ let selectedLiabilityState = null;
 let liabilityContractsState = [];
 let liabilitiesLoaded = false;
 let liabilityDetailRequestID = 0;
+let reservationsState = [];
+let selectedReservationState = null;
+let reservationsLoaded = false;
+let reservationDetailRequestID = 0;
 let casesState = [];
 let selectedCaseState = null;
 let caseDocumentsState = [];
@@ -289,6 +293,7 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
         <nav class="wealth-tabs" aria-label="Vermogen onderdelen" role="tablist">
           <button type="button" class="wealth-tab active" data-wealth-section-target="assets" role="tab" aria-selected="true">Bezittingen</button>
           <button type="button" class="wealth-tab" data-wealth-section-target="liabilities" role="tab" aria-selected="false">Schulden</button>
+          <button type="button" class="wealth-tab" data-wealth-section-target="reservations" role="tab" aria-selected="false">Reserveringen</button>
         </nav>
         <section class="wealth-section active" data-wealth-section="assets">
           <section id="assets-root" class="assets-shell">
@@ -310,7 +315,6 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
                   <label>Naam <input name="name" type="text" required /></label>
                   <label>Type <select name="assetType" required>${assetTypeOptions()}</select></label>
                   <label>Status <select name="status" required>${assetStatusOptions('active')}</select></label>
-                  <label>Valuta <input name="currency" type="text" maxlength="3" value="EUR" required /></label>
                   <label>Aankoopdatum <input name="acquiredAt" type="date" /></label>
                   <label>Afvoerdatum <input name="disposedAt" type="date" /></label>
                   <label>Aankoopwaarde <input name="purchaseValue" type="number" min="0" step="0.01" value="0.00" /></label>
@@ -383,7 +387,7 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
           </header>
           <form id="liability-filter-form" class="asset-filter-form">
             <label>Type <select name="type"><option value="">Alle typen</option>${liabilityTypeOptions()}</select></label>
-            <label>Status <select name="status"><option value="">Alle statussen</option>${liabilityStatusOptions()}</select></label>
+            <label>Status <select name="status"><option value="">Alle statussen</option>${liabilityStatusOptions('active')}</select></label>
           </form>
           <div class="assets-layout">
             <aside class="asset-list-panel"><div id="liability-list"><p>Open Schulden om de lijst te laden.</p></div></aside>
@@ -400,7 +404,6 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
                   <label>Einddatum <input name="endDate" type="date" /></label>
                   <label>Oorspronkelijk bedrag <input name="originalAmount" type="number" min="0" step="0.01" value="0.00" /></label>
                   <label>Huidig saldo <input name="currentBalance" type="number" min="0" step="0.01" value="0.00" /></label>
-                  <label>Valuta <input name="currency" type="text" maxlength="3" value="EUR" required /></label>
                   <label class="asset-description-field">Omschrijving <textarea name="description" rows="3"></textarea></label>
                   <div class="form-actions asset-form-actions"><button type="submit">Opslaan</button><button type="button" class="secondary-button" data-liability-action="cancel-form">Annuleren</button></div>
                 </form>
@@ -441,6 +444,51 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
                 <section class="asset-detail-section" data-liability-detail-section="timeline"><div id="liability-timeline" class="domain-timeline"></div></section>
               </section>
               <section id="liability-empty-state" class="asset-panel empty-state"><strong>Kies een schuld</strong><p>Selecteer een schuld of maak een nieuwe aan.</p></section>
+            </div>
+          </div>
+          </section>
+        </section>
+        <section class="wealth-section" data-wealth-section="reservations">
+          <section id="reservations-root" class="assets-shell liabilities-shell">
+          <header class="assets-heading">
+            <div><p class="eyebrow">Toekomstige verplichtingen</p><h1>Reserveringen</h1><p>Leg toekomstige schulden of geplande verplichtingen vast met documenten en tijdlijn.</p></div>
+            <button type="button" class="asset-new-button" data-reservation-action="new">Nieuwe reservering</button>
+          </header>
+          <form id="reservation-filter-form" class="asset-filter-form">
+            <label>Type <select name="type"><option value="">Alle typen</option>${liabilityTypeOptions()}</select></label>
+          </form>
+          <div class="assets-layout">
+            <aside class="asset-list-panel"><div id="reservation-list"><p>Open Reserveringen om de lijst te laden.</p></div></aside>
+            <div class="asset-content">
+              <section id="reservation-form-panel" class="asset-panel hidden">
+                <div class="panel-heading"><h2 id="reservation-form-title">Nieuwe reservering</h2></div>
+                <form id="reservation-form" class="asset-form liability-form">
+                  <input name="id" type="hidden" />
+                  <label>Naam <input name="name" type="text" required /></label>
+                  <label>Type <select name="liabilityType" required>${liabilityTypeOptions()}</select></label>
+                  <label>Verwachte datum <input name="endDate" type="date" /></label>
+                  <label>Bedrag <input name="currentBalance" type="number" min="0" step="0.01" value="0.00" /></label>
+                  <label class="asset-description-field">Omschrijving <textarea name="description" rows="3"></textarea></label>
+                  <div class="form-actions asset-form-actions"><button type="submit">Opslaan</button><button type="button" class="secondary-button" data-reservation-action="cancel-form">Annuleren</button></div>
+                </form>
+              </section>
+              <section id="reservation-detail" class="asset-panel hidden">
+                <div class="asset-detail-heading"><div><small>Reservering</small><h2 id="reservation-detail-name"></h2></div><div class="row-actions"><button type="button" class="secondary-button" data-reservation-action="edit">Wijzigen</button><button type="button" class="secondary-button" data-reservation-action="delete">Verwijderen</button></div></div>
+                <nav class="asset-detail-tabs" aria-label="Reservering onderdelen">
+                  <button type="button" class="asset-detail-tab active" data-reservation-detail-target="overview">Overzicht</button>
+                  <button type="button" class="asset-detail-tab" data-reservation-detail-target="documents">Documenten</button>
+                  <button type="button" class="asset-detail-tab" data-reservation-detail-target="timeline">Tijdlijn</button>
+                </nav>
+                <section class="asset-detail-section active" data-reservation-detail-section="overview" id="reservation-overview"></section>
+                <section class="asset-detail-section" data-reservation-detail-section="documents">
+                  <div id="reservation-document-list" class="document-list"></div>
+                  <form id="reservation-document-upload-form" class="document-form"><label>Bestand <input name="file" type="file" required /></label><label>Documentdatum <input name="documentDate" type="date" /></label><label>Omschrijving <input name="description" type="text" /></label><button type="submit">Uploaden en koppelen</button></form>
+                  <form id="reservation-document-link-form" class="document-link-form"><label>Bestaand document <select name="documentId" required></select></label><button type="submit" class="secondary-button">Bestaand document koppelen</button></form>
+                  <p id="reservation-document-status" class="document-status" aria-live="polite"></p>
+                </section>
+                <section class="asset-detail-section" data-reservation-detail-section="timeline"><div id="reservation-timeline" class="domain-timeline"></div></section>
+              </section>
+              <section id="reservation-empty-state" class="asset-panel empty-state"><strong>Kies een reservering</strong><p>Selecteer een reservering of maak een nieuwe aan.</p></section>
             </div>
           </div>
           </section>
@@ -685,6 +733,11 @@ function render({ summary, mainCategories, categories, accounts, transactionYear
   document.querySelector('#liability-document-upload-form').addEventListener('submit', uploadLiabilityDocument);
   document.querySelector('#liability-document-link-form').addEventListener('submit', linkExistingLiabilityDocument);
   document.querySelector('#liability-transaction-link-form').addEventListener('submit', linkLiabilityTransaction);
+  document.querySelector('#reservations-root').addEventListener('click', handleReservationAction);
+  document.querySelector('#reservation-filter-form').addEventListener('change', loadReservations);
+  document.querySelector('#reservation-form').addEventListener('submit', saveReservation);
+  document.querySelector('#reservation-document-upload-form').addEventListener('submit', uploadReservationDocument);
+  document.querySelector('#reservation-document-link-form').addEventListener('submit', linkExistingReservationDocument);
   document.querySelector('#cases-root').addEventListener('click', handleCaseAction);
   document.querySelector('#case-filter-form input[name="caseType"]').addEventListener('input', loadCases);
   document.querySelector('#case-filter-form').addEventListener('change', loadCases);
@@ -1439,10 +1492,105 @@ function renderTransactionDocuments(documents) {
   }
   return `<ul>${documents.map((document) => `
     <li>
-      <div><a href="${apiBaseUrl}/api/v1/documents/${document.id}/content" target="_blank" rel="noopener">${escapeHtml(document.originalFilename)}</a><small>${escapeHtml(document.documentDate || document.mimeType)} &middot; ${formatFileSize(document.sizeBytes)}</small>${document.description ? `<span>${escapeHtml(document.description)}</span>` : ''}</div>
+      <div><a href="${apiBaseUrl}/api/v1/documents/${document.id}/content" target="_blank" rel="noopener">${escapeHtml(document.originalFilename)}</a><small>${escapeHtml(document.documentDate || document.mimeType)} &middot; ${formatFileSize(document.sizeBytes)}</small>${document.description ? `<span>${escapeHtml(document.description)}</span>` : ''}${renderDocumentTranslation(document)}</div>
       <button type="button" class="icon-button danger" data-action="unlink-document" data-document-id="${document.id}" aria-label="Verwijder koppeling">&#10005;</button>
     </li>
   `).join('')}</ul>`;
+}
+
+function renderDocumentTranslation(document) {
+  switch (document.translationStatus) {
+  case 'pending': return '<small>Documentanalyse wordt gemaakt...</small>';
+  case 'completed': return document.translationText
+    ? `<details class="document-analysis"><summary>Nederlandse documentanalyse</summary><div class="document-analysis-body">${renderDocumentAnalysis(document.translationText)}</div></details>`
+    : '<small>Geen documentanalyse beschikbaar.</small>';
+  case 'unsupported': return '<small>Geen leesbare tekst gevonden; OCR is nog niet beschikbaar.</small>';
+  case 'failed': return '<small>Documentanalyse is mislukt.</small>';
+  default: return '';
+  }
+}
+
+function renderDocumentAnalysis(text) {
+  const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+  const blocks = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index].trim();
+    if (!line) {
+      index += 1;
+      continue;
+    }
+    if (/^#{1,3}\s+/.test(line)) {
+      blocks.push(`<h4>${formatDocumentAnalysisInline(line.replace(/^#{1,3}\s+/, ''))}</h4>`);
+      index += 1;
+      continue;
+    }
+    if (/^\*\*[^*]+\*\*:?$/.test(line)) {
+      blocks.push(`<h4>${formatDocumentAnalysisInline(line.replace(/^\*\*|\*\*:?$/g, ''))}</h4>`);
+      index += 1;
+      continue;
+    }
+    if (isDocumentAnalysisHeading(line)) {
+      blocks.push(`<h4>${formatDocumentAnalysisInline(line.replace(/^[^\p{L}\p{N}]+/u, ''))}</h4>`);
+      index += 1;
+      continue;
+    }
+    if (isDocumentAnalysisTableLine(lines[index]) && isDocumentAnalysisTableLine(lines[index + 1] || '')) {
+      const tableLines = [];
+      while (index < lines.length && isDocumentAnalysisTableLine(lines[index])) {
+        tableLines.push(lines[index]);
+        index += 1;
+      }
+      blocks.push(renderDocumentAnalysisTable(tableLines));
+      continue;
+    }
+    if (/^([-*]|\d+\.)\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^([-*]|\d+\.)\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^([-*]|\d+\.)\s+/, ''));
+        index += 1;
+      }
+      blocks.push(`<ul>${items.map((item) => `<li>${formatDocumentAnalysisInline(item)}</li>`).join('')}</ul>`);
+      continue;
+    }
+    const paragraph = [line];
+    index += 1;
+    while (index < lines.length && lines[index].trim() && !isDocumentAnalysisBlockStart(lines[index])) {
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    blocks.push(`<p>${formatDocumentAnalysisInline(paragraph.join(' '))}</p>`);
+  }
+  return blocks.join('');
+}
+
+function isDocumentAnalysisBlockStart(line) {
+  const value = String(line || '').trim();
+  return /^#{1,3}\s+/.test(value) || /^\*\*[^*]+\*\*:?$/.test(value) || isDocumentAnalysisHeading(value) || isDocumentAnalysisTableLine(value) || /^([-*]|\d+\.)\s+/.test(value);
+}
+
+function isDocumentAnalysisHeading(line) {
+  const value = String(line || '').trim().replace(/^[^\p{L}\p{N}]+/u, '').replace(/:$/, '');
+  if (!value || value.length > 70 || value.includes('.')) return false;
+  return /^(belangrijkste gegevens|kerngegevens|apparaatgegevens|objectgegevens|meetresultaten|bevindingen|conclusie|wat betekent dit voor jou|partijen|data|bedragen|risico|risico's|gebreken)/i.test(value);
+}
+
+function isDocumentAnalysisTableLine(line) {
+  const value = String(line || '').trim();
+  return (value.includes('|') && value.split('|').filter((cell) => cell.trim()).length >= 2) || value.split('\t').filter(Boolean).length >= 2;
+}
+
+function renderDocumentAnalysisTable(lines) {
+  const rows = lines
+    .map((line) => line.includes('|') ? line.split('|').map((cell) => cell.trim()).filter(Boolean) : line.split('\t').map((cell) => cell.trim()).filter(Boolean))
+    .filter((row) => row.length && !row.every((cell) => /^:?-{3,}:?$/.test(cell)));
+  if (!rows.length) return '';
+  const [head, ...body] = rows;
+  return `<div class="document-analysis-table"><table><thead><tr>${head.map((cell) => `<th>${formatDocumentAnalysisInline(cell)}</th>`).join('')}</tr></thead><tbody>${body.map((row) => `<tr>${head.map((_, cellIndex) => `<td>${formatDocumentAnalysisInline(row[cellIndex] || '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+
+function formatDocumentAnalysisInline(value) {
+  return escapeHtml(value).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 }
 
 function renderExistingDocumentOptions(allDocuments, linkedDocuments) {
@@ -1705,7 +1853,6 @@ function showAssetForm(asset = null) {
   form.elements.name.value = asset?.name || '';
   form.elements.assetType.value = asset?.assetType || 'real_estate';
   form.elements.status.value = asset?.status || 'active';
-  form.elements.currency.value = asset?.currency || 'EUR';
   form.elements.acquiredAt.value = asset?.acquiredAt || '';
   form.elements.disposedAt.value = asset?.disposedAt || '';
   form.elements.purchaseValue.value = centsToInput(asset?.purchaseValueCents || 0);
@@ -1760,7 +1907,7 @@ async function saveAsset(event) {
     name: form.elements.name.value,
     assetType: form.elements.assetType.value,
     status: form.elements.status.value,
-    currency: form.elements.currency.value,
+    currency: selectedAssetState?.id === id ? selectedAssetState.currency : 'EUR',
     acquiredAt: form.elements.acquiredAt.value,
     disposedAt: form.elements.disposedAt.value,
     purchaseValueCents: amountInputToCents(form.elements.purchaseValue.value),
@@ -1799,7 +1946,7 @@ async function loadAssetDetail(id, targetSection = 'overview') {
     assetValuationsState = valuations;
     assetContractsState = contractsForRelations(contracts, relations, 'asset', asset.id);
     document.querySelector('#asset-detail-name').textContent = asset.name;
-    document.querySelector('#asset-overview').innerHTML = renderAssetOverview(asset);
+    document.querySelector('#asset-overview').innerHTML = renderAssetOverview(asset, { contracts: assetContractsState, documents, transactions, events });
     document.querySelector('#asset-current-value').textContent = formatAssetValue(asset.currentValueCents, asset.currency);
     document.querySelector('#asset-valuation-list').innerHTML = renderAssetValuations(valuations, asset.currency);
     resetAssetValuationForm();
@@ -1830,8 +1977,49 @@ function contractsForRelations(contracts, relations, objectType, objectID) {
   return contracts.filter((item) => contractIDs.has(item.id));
 }
 
-function renderAssetOverview(asset) {
-  return `<dl class="asset-overview-grid"><div><dt>Type</dt><dd>${escapeHtml(assetTypeLabel(asset.assetType))}</dd></div><div><dt>Status</dt><dd>${escapeHtml(assetStatusLabel(asset.status))}</dd></div><div><dt>Aankoopdatum</dt><dd>${escapeHtml(asset.acquiredAt || 'Niet vastgelegd')}</dd></div><div><dt>Afvoerdatum</dt><dd>${escapeHtml(asset.disposedAt || 'Niet van toepassing')}</dd></div><div><dt>Aankoopwaarde</dt><dd>${formatAssetValue(asset.purchaseValueCents, asset.currency)}</dd></div><div><dt>Huidige waarde</dt><dd>${formatAssetValue(asset.currentValueCents, asset.currency)}</dd></div></dl><p class="asset-description">${escapeHtml(asset.description || 'Geen omschrijving.')}</p>`;
+function renderAssetOverview(asset, related = {}) {
+  return `${renderCompactTimeline(related.events || [])}<dl class="asset-overview-grid"><div><dt>Type</dt><dd>${escapeHtml(assetTypeLabel(asset.assetType))}</dd></div><div><dt>Status</dt><dd>${escapeHtml(assetStatusLabel(asset.status))}</dd></div><div><dt>Aankoopdatum</dt><dd>${escapeHtml(asset.acquiredAt || 'Niet vastgelegd')}</dd></div><div><dt>Afvoerdatum</dt><dd>${escapeHtml(asset.disposedAt || 'Niet van toepassing')}</dd></div><div><dt>Aankoopwaarde</dt><dd>${formatAssetValue(asset.purchaseValueCents, asset.currency)}</dd></div><div><dt>Huidige waarde</dt><dd>${formatAssetValue(asset.currentValueCents, asset.currency)}</dd></div></dl><p class="asset-description">${escapeHtml(asset.description || 'Geen omschrijving.')}</p>${renderWealthOverviewRelated(related, 'asset')}`;
+}
+
+function renderCompactTimeline(events) {
+  const sorted = [...events].sort((left, right) => String(left.eventDate).localeCompare(String(right.eventDate)) || left.id - right.id);
+  const items = sorted.length <= 6 ? sorted : [sorted[0], ...sorted.slice(-5)];
+  if (!items.length) return '<div class="asset-overview-summary compact-timeline"><h3>Tijdlijn</h3><p>Nog geen gebeurtenissen.</p></div>';
+  return `<div class="asset-overview-summary compact-timeline"><div class="compact-timeline-heading"><h3>Tijdlijn</h3><span>${escapeHtml(formatTimelineDate(sorted[0].eventDate))} tot ${escapeHtml(formatTimelineDate(sorted[sorted.length - 1].eventDate))}</span></div><ol>${items.map((event, index) => `<li class="${index === 0 ? 'first' : ''} ${index === items.length - 1 ? 'last' : ''}"><button type="button" class="compact-timeline-node" aria-label="${escapeHtml(domainEventTypeLabel(event.eventType))} op ${escapeHtml(formatTimelineDate(event.eventDate))}"><span class="compact-timeline-dot"></span><time datetime="${escapeHtml(event.eventDate)}">${escapeHtml(formatTimelineDate(event.eventDate))}</time><strong>${escapeHtml(domainEventTypeLabel(event.eventType))}</strong><span class="compact-timeline-popover">${escapeHtml(event.description || domainEventTypeLabel(event.eventType))}${event.relatedEntityLabel ? `<br>${escapeHtml(event.relatedEntityLabel)}` : ''}</span></button></li>`).join('')}</ol></div>`;
+}
+
+function renderWealthOverviewRelated(related, type) {
+  const actionPrefix = type === 'asset' ? 'asset' : 'liability';
+  const detailPrefix = type === 'asset' ? 'asset' : 'liability';
+  return `<div class="asset-overview-related">
+    ${renderOverviewContracts(related.contracts || [], actionPrefix)}
+    ${renderOverviewDocuments(related.documents || [])}
+    ${renderOverviewTransactions(related.transactions || [])}
+    <div class="overview-jump-links">
+      <button type="button" class="secondary-button" data-${detailPrefix}-detail-target="contracts">Alle contracten</button>
+      <button type="button" class="secondary-button" data-${detailPrefix}-detail-target="documents">Alle documenten</button>
+      <button type="button" class="secondary-button" data-${detailPrefix}-detail-target="transactions">Alle transacties</button>
+    </div>
+  </div>`;
+}
+
+function renderOverviewContracts(contracts, actionPrefix) {
+  const items = contracts.slice(0, 3);
+  return `<section class="asset-overview-summary"><h3>Contracten</h3>${items.length ? `<ul>${items.map((item) => `<li><button type="button" class="link-button" data-${actionPrefix}-action="open-contract" data-contract-id="${item.id}">${escapeHtml(item.title)}</button><small>${escapeHtml(caseStatusLabel(item.status))}${item.endDate ? ` · t/m ${escapeHtml(item.endDate)}` : ''}</small></li>`).join('')}</ul>` : '<p>Nog geen contracten gekoppeld.</p>'}</section>`;
+}
+
+function renderOverviewDocuments(documents) {
+  const items = documents.slice(0, 3);
+  return `<section class="asset-overview-summary"><h3>Documenten</h3>${items.length ? `<ul>${items.map((item) => `<li><a href="${apiBaseUrl}/api/v1/documents/${item.id}/content" target="_blank" rel="noopener">${escapeHtml(item.originalFilename)}</a><small>${escapeHtml(item.documentDate || item.mimeType || '')}${item.translationStatus && item.translationStatus !== 'not_requested' ? ` · ${escapeHtml(documentTranslationStatusLabel(item.translationStatus))}` : ''}</small></li>`).join('')}</ul>` : '<p>Nog geen documenten gekoppeld.</p>'}</section>`;
+}
+
+function renderOverviewTransactions(transactions) {
+  const items = transactions.slice(0, 5);
+  return `<section class="asset-overview-summary"><h3>Transacties</h3>${items.length ? `<ul>${items.map((item) => `<li><span>${escapeHtml(item.description)}</span><small>${escapeHtml(item.bookedOn)}${item.counterparty ? ` · ${escapeHtml(item.counterparty)}` : ''}</small><strong>${formatAmount(item.amountCents)}</strong></li>`).join('')}</ul>` : '<p>Nog geen transacties gekoppeld.</p>'}</section>`;
+}
+
+function documentTranslationStatusLabel(value) {
+  return { pending: 'analyse loopt', completed: 'geanalyseerd', unsupported: 'geen tekst/OCR nodig', failed: 'analyse mislukt' }[value] || value;
 }
 
 function renderAssetValuations(valuations, currency) {
@@ -1986,7 +2174,7 @@ async function deleteSelectedAsset() {
 
 function renderAssetDocuments(documents) {
   if (!documents.length) return '<p>Nog geen documenten gekoppeld.</p>';
-  return `<ul>${documents.map((document) => `<li><div><a href="${apiBaseUrl}/api/v1/documents/${document.id}/content" target="_blank" rel="noopener">${escapeHtml(document.originalFilename)}</a><small>${escapeHtml(document.documentDate || document.mimeType)} &middot; ${formatFileSize(document.sizeBytes)}</small></div><button type="button" class="icon-button danger" data-asset-action="unlink-asset-document" data-document-id="${document.id}" aria-label="Verwijder koppeling">&#10005;</button></li>`).join('')}</ul>`;
+  return `<ul>${documents.map((document) => `<li><div><a href="${apiBaseUrl}/api/v1/documents/${document.id}/content" target="_blank" rel="noopener">${escapeHtml(document.originalFilename)}</a><small>${escapeHtml(document.documentDate || document.mimeType)} &middot; ${formatFileSize(document.sizeBytes)}</small>${renderDocumentTranslation(document)}</div><button type="button" class="icon-button danger" data-asset-action="unlink-asset-document" data-document-id="${document.id}" aria-label="Verwijder koppeling">&#10005;</button></li>`).join('')}</ul>`;
 }
 
 function renderAssetDocumentOptions(allDocuments, linkedDocuments) {
@@ -2109,10 +2297,11 @@ function renderDashboardWealthAmounts(totals, currencies) {
   return currencies.map((currency) => `<strong>${formatAssetValue(totals[currency] || 0, currency)}</strong>`).join('');
 }
 
-function renderDashboardWealth(assets, liabilities) {
+function renderDashboardWealth(assets, liabilities, reservations = []) {
   const assetTotals = dashboardAmountsByCurrency(assets, 'currentValueCents');
   const liabilityTotals = dashboardAmountsByCurrency(liabilities, 'currentBalanceCents');
-  const currencies = [...new Set([...Object.keys(assetTotals), ...Object.keys(liabilityTotals)])].sort();
+  const reservationTotals = dashboardAmountsByCurrency(reservations, 'amountCents');
+  const currencies = [...new Set([...Object.keys(assetTotals), ...Object.keys(liabilityTotals), ...Object.keys(reservationTotals)])].sort();
   if (!currencies.length) currencies.push('EUR');
   const netTotals = Object.fromEntries(currencies.map((currency) => [currency, (assetTotals[currency] || 0) - (liabilityTotals[currency] || 0)]));
   const netWorth = document.querySelector('#dashboard-net-worth');
@@ -2133,6 +2322,10 @@ function renderDashboardWealth(assets, liabilities) {
       <span>Nettovermogen <small>Bezittingen min schulden</small></span>
       <span class="dashboard-wealth-values">${renderDashboardWealthAmounts(netTotals, currencies)}</span>
     </div>
+    <button type="button" class="dashboard-wealth-card" data-wealth-target="reservations">
+      <span>Reserveringen <small>${reservations.length} gepland</small></span>
+      <span class="dashboard-wealth-values">${renderDashboardWealthAmounts(reservationTotals, currencies)}</span>
+    </button>
   `;
 }
 
@@ -2140,15 +2333,16 @@ async function loadDashboardWealth() {
   const summary = document.querySelector('#dashboard-wealth-summary');
   if (!summary) return;
   try {
-    const [assetResponse, liabilityResponse, accountResponse] = await Promise.all([
+    const [assetResponse, liabilityResponse, reservationResponse, accountResponse] = await Promise.all([
       fetch(`${apiBaseUrl}/api/v1/assets?status=active`),
       fetch(`${apiBaseUrl}/api/v1/liabilities?status=active`),
+      fetch(`${apiBaseUrl}/api/v1/reservations`),
       fetch(`${apiBaseUrl}/api/v1/accounts`),
     ]);
-    if (!assetResponse.ok || !liabilityResponse.ok || !accountResponse.ok) throw new Error('Vermogen kon niet worden geladen');
-    const [assets, liabilities, accounts] = await Promise.all([assetResponse.json(), liabilityResponse.json(), accountResponse.json()]);
+    if (!assetResponse.ok || !liabilityResponse.ok || !reservationResponse.ok || !accountResponse.ok) throw new Error('Vermogen kon niet worden geladen');
+    const [assets, liabilities, reservations, accounts] = await Promise.all([assetResponse.json(), liabilityResponse.json(), reservationResponse.json(), accountResponse.json()]);
     const savingsAccounts = accounts.filter((account) => account.type === 'savings').map(savingsAccountAsset);
-    renderDashboardWealth([...assets, ...savingsAccounts], liabilities);
+    renderDashboardWealth([...assets, ...savingsAccounts], liabilities, reservations);
   } catch (error) {
     document.querySelector('#dashboard-net-worth').textContent = 'Niet beschikbaar';
     summary.innerHTML = `<p class="dashboard-wealth-error">${escapeHtml(error.message)}</p>`;
@@ -2264,7 +2458,7 @@ async function loadLiabilities() {
     if (!response.ok) throw new Error(liabilities.error || 'Schulden laden mislukt');
     liabilitiesState = liabilities;
     liabilitiesLoaded = true;
-    list.innerHTML = renderLiabilityList(liabilities);
+    list.innerHTML = renderLiabilityList(liabilitiesState);
   } catch (error) {
     list.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
   }
@@ -2314,7 +2508,6 @@ function showLiabilityForm(liability = null) {
   form.elements.endDate.value = liability?.endDate || '';
   form.elements.originalAmount.value = centsToInput(liability?.originalAmountCents || 0);
   form.elements.currentBalance.value = centsToInput(liability?.currentBalanceCents || 0);
-  form.elements.currency.value = liability?.currency || 'EUR';
   form.elements.status.value = liability?.status || 'active';
   document.querySelector('#liability-form-title').textContent = liability ? 'Schuld wijzigen' : 'Nieuwe schuld';
   document.querySelector('#liability-form-panel').classList.remove('hidden');
@@ -2340,7 +2533,7 @@ async function saveLiability(event) {
     endDate: form.elements.endDate.value,
     originalAmountCents: amountInputToCents(form.elements.originalAmount.value),
     currentBalanceCents: amountInputToCents(form.elements.currentBalance.value),
-    currency: form.elements.currency.value,
+    currency: selectedLiabilityState?.id === id ? selectedLiabilityState.currency : 'EUR',
     status: form.elements.status.value,
   };
   try {
@@ -2373,7 +2566,7 @@ async function loadLiabilityDetail(id, targetSection = 'overview') {
     selectedLiabilityState = liability;
     liabilityContractsState = contractsForRelations(contracts, relations, 'liability', liability.id);
     document.querySelector('#liability-detail-name').textContent = liability.name;
-    document.querySelector('#liability-overview').innerHTML = renderLiabilityOverview(liability);
+    document.querySelector('#liability-overview').innerHTML = renderLiabilityOverview(liability, { contracts: liabilityContractsState, documents, transactions, events });
     document.querySelector('#liability-contract-list').innerHTML = renderLiabilityContracts(liabilityContractsState);
     resetLiabilityContractForm();
     document.querySelector('#liability-document-list').innerHTML = renderLiabilityDocuments(documents);
@@ -2392,8 +2585,8 @@ async function loadLiabilityDetail(id, targetSection = 'overview') {
   }
 }
 
-function renderLiabilityOverview(liability) {
-  return `<dl class="asset-overview-grid"><div><dt>Type</dt><dd>${escapeHtml(liabilityTypeLabel(liability.liabilityType))}</dd></div><div><dt>Status</dt><dd>${escapeHtml(liabilityStatusLabel(liability.status))}</dd></div><div><dt>Schuldeiser</dt><dd>${escapeHtml(liability.creditor || 'Niet vastgelegd')}</dd></div><div><dt>Looptijd</dt><dd>${escapeHtml(liability.startDate || '...')} t/m ${escapeHtml(liability.endDate || '...')}</dd></div><div><dt>Oorspronkelijk bedrag</dt><dd>${formatAssetValue(liability.originalAmountCents, liability.currency)}</dd></div><div><dt>Huidig saldo</dt><dd>${formatAssetValue(liability.currentBalanceCents, liability.currency)}</dd></div></dl><p class="asset-description">${escapeHtml(liability.description || 'Geen omschrijving.')}</p>`;
+function renderLiabilityOverview(liability, related = {}) {
+  return `${renderCompactTimeline(related.events || [])}<dl class="asset-overview-grid"><div><dt>Type</dt><dd>${escapeHtml(liabilityTypeLabel(liability.liabilityType))}</dd></div><div><dt>Status</dt><dd>${escapeHtml(liabilityStatusLabel(liability.status))}</dd></div><div><dt>Schuldeiser</dt><dd>${escapeHtml(liability.creditor || 'Niet vastgelegd')}</dd></div><div><dt>Looptijd</dt><dd>${escapeHtml(liability.startDate || '...')} t/m ${escapeHtml(liability.endDate || '...')}</dd></div><div><dt>Oorspronkelijk bedrag</dt><dd>${formatAssetValue(liability.originalAmountCents, liability.currency)}</dd></div><div><dt>Huidig saldo</dt><dd>${formatAssetValue(liability.currentBalanceCents, liability.currency)}</dd></div></dl><p class="asset-description">${escapeHtml(liability.description || 'Geen omschrijving.')}</p>${renderWealthOverviewRelated(related, 'liability')}`;
 }
 
 function renderLiabilityContracts(contracts) {
@@ -2478,9 +2671,208 @@ async function deleteSelectedLiability() {
   await loadLiabilities();
 }
 
+async function loadReservations() {
+  const form = document.querySelector('#reservation-filter-form');
+  const params = new URLSearchParams();
+  if (form.elements.type.value) params.set('type', form.elements.type.value);
+  const list = document.querySelector('#reservation-list');
+  list.innerHTML = '<p>Reserveringen laden...</p>';
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/v1/reservations?${params}`);
+    const reservations = await response.json();
+    if (!response.ok) throw new Error(reservations.error || 'Reserveringen laden mislukt');
+    reservationsState = reservations;
+    reservationsLoaded = true;
+    list.innerHTML = renderReservationList(reservations);
+  } catch (error) {
+    list.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function renderReservationList(reservations) {
+  if (!reservations.length) return '<p>Geen reserveringen gevonden.</p>';
+  return `<ul>${reservations.map((item) => `<li><button type="button" class="asset-list-button ${selectedReservationState?.id === item.id ? 'active' : ''}" data-reservation-id="${item.id}"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(liabilityTypeLabel(item.reserveType))}${item.dueDate ? ` · ${escapeHtml(item.dueDate)}` : ''}</small></span><b>${formatAssetValue(item.amountCents, item.currency)}</b></button></li>`).join('')}</ul>`;
+}
+
+async function handleReservationAction(event) {
+  const selectButton = event.target.closest('[data-reservation-id]');
+  if (selectButton) {
+    await loadReservationDetail(Number(selectButton.dataset.reservationId));
+    return;
+  }
+  const button = event.target.closest('[data-reservation-action], [data-reservation-detail-target]');
+  if (!button) return;
+  if (button.dataset.reservationDetailTarget) {
+    switchReservationDetailSection(button.dataset.reservationDetailTarget);
+    return;
+  }
+  switch (button.dataset.reservationAction) {
+  case 'new': showReservationForm(); break;
+  case 'edit': showReservationForm(selectedReservationState); break;
+  case 'cancel-form': hideReservationForm(); break;
+  case 'delete': await deleteSelectedReservation(); break;
+  case 'unlink-document': await unlinkReservationDocument(Number(button.dataset.documentId)); break;
+  }
+}
+
+function showReservationForm(item = null) {
+  reservationDetailRequestID += 1;
+  const form = document.querySelector('#reservation-form');
+  form.reset();
+  form.elements.id.value = item?.id || '';
+  form.elements.name.value = item?.name || '';
+  form.elements.liabilityType.value = item?.reserveType || 'other';
+  form.elements.description.value = item?.description || '';
+  form.elements.endDate.value = item?.dueDate || '';
+  form.elements.currentBalance.value = centsToInput(item?.amountCents || 0);
+  document.querySelector('#reservation-form-title').textContent = item ? 'Reservering wijzigen' : 'Nieuwe reservering';
+  document.querySelector('#reservation-form-panel').classList.remove('hidden');
+  document.querySelector('#reservation-detail').classList.add('hidden');
+  document.querySelector('#reservation-empty-state').classList.add('hidden');
+}
+
+function hideReservationForm() {
+  document.querySelector('#reservation-form-panel').classList.add('hidden');
+  document.querySelector(selectedReservationState ? '#reservation-detail' : '#reservation-empty-state').classList.remove('hidden');
+}
+
+async function saveReservation(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const id = Number(form.elements.id.value);
+  const amountCents = amountInputToCents(form.elements.currentBalance.value);
+  const input = {
+    name: form.elements.name.value,
+    reserveType: form.elements.liabilityType.value,
+    description: form.elements.description.value,
+    dueDate: form.elements.endDate.value,
+    amountCents,
+    currency: 'EUR',
+  };
+  try {
+    const response = await fetch(id ? `${apiBaseUrl}/api/v1/reservations/${id}` : `${apiBaseUrl}/api/v1/reservations`, { method: id ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
+    const reservation = await response.json();
+    if (!response.ok) throw new Error(reservation.error || 'Reservering opslaan mislukt');
+    hideReservationForm();
+    await loadReservations();
+    await loadReservationDetail(reservation.id);
+    loadDashboardWealth();
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+async function loadReservationDetail(id, targetSection = 'overview') {
+  const requestID = ++reservationDetailRequestID;
+  try {
+    const [reservationResponse, documentsResponse, allDocumentsResponse, eventsResponse] = await Promise.all([
+      fetch(`${apiBaseUrl}/api/v1/reservations/${id}`), fetch(`${apiBaseUrl}/api/v1/reservations/${id}/documents`),
+      fetch(`${apiBaseUrl}/api/v1/documents`), fetch(`${apiBaseUrl}/api/v1/reservations/${id}/events`),
+    ]);
+    const [reservation, documentsResult, allDocumentsResult, eventsResult] = await Promise.all([reservationResponse.json(), documentsResponse.json(), allDocumentsResponse.json(), eventsResponse.json()]);
+    const documentsUnavailable = documentsResponse.status === 501 || allDocumentsResponse.status === 501;
+    if (!reservationResponse.ok || (!documentsResponse.ok && documentsResponse.status !== 501) || (!allDocumentsResponse.ok && allDocumentsResponse.status !== 501) || !eventsResponse.ok) throw new Error(reservation.error || documentsResult.error || allDocumentsResult.error || eventsResult?.error || 'Reservering laden mislukt');
+    const events = validateDomainEvents(eventsResult);
+    if (requestID !== reservationDetailRequestID) return;
+    const documents = documentsResponse.status === 501 ? [] : documentsResult;
+    const allDocuments = allDocumentsResponse.status === 501 ? [] : allDocumentsResult;
+    selectedReservationState = reservation;
+    document.querySelector('#reservation-detail-name').textContent = reservation.name;
+    document.querySelector('#reservation-overview').innerHTML = renderReservationOverview(reservation);
+    document.querySelector('#reservation-document-list').innerHTML = renderReservationDocuments(documents);
+    document.querySelector('#reservation-document-status').textContent = documentsUnavailable ? 'Documentopslag is momenteel niet beschikbaar.' : '';
+    renderReservationDocumentOptions(allDocuments, documents);
+    document.querySelector('#reservation-timeline').innerHTML = renderDomainTimeline(events);
+    document.querySelector('#reservation-detail').classList.remove('hidden');
+    document.querySelector('#reservation-empty-state').classList.add('hidden');
+    document.querySelector('#reservation-form-panel').classList.add('hidden');
+    document.querySelector('#reservation-list').innerHTML = renderReservationList(reservationsState);
+    switchReservationDetailSection(targetSection);
+  } catch (error) {
+    if (requestID === reservationDetailRequestID) window.alert(error.message);
+  }
+}
+
+function renderReservationOverview(item) {
+  return `<dl class="asset-overview-grid"><div><dt>Type</dt><dd>${escapeHtml(liabilityTypeLabel(item.reserveType))}</dd></div><div><dt>Verwachte datum</dt><dd>${escapeHtml(item.dueDate || 'Niet vastgelegd')}</dd></div><div><dt>Bedrag</dt><dd>${formatAssetValue(item.amountCents, item.currency)}</dd></div></dl><p class="asset-description">${escapeHtml(item.description || 'Geen omschrijving.')}</p>`;
+}
+
+function switchReservationDetailSection(target) {
+  document.querySelectorAll('[data-reservation-detail-target]').forEach((button) => button.classList.toggle('active', button.dataset.reservationDetailTarget === target));
+  document.querySelectorAll('[data-reservation-detail-section]').forEach((section) => section.classList.toggle('active', section.dataset.reservationDetailSection === target));
+}
+
+async function deleteSelectedReservation() {
+  if (!selectedReservationState || !window.confirm(`Reservering "${selectedReservationState.name}" verwijderen?`)) return;
+  const response = await fetch(`${apiBaseUrl}/api/v1/reservations/${selectedReservationState.id}`, { method: 'DELETE' });
+  if (!response.ok) return window.alert((await response.json()).error || 'Reservering verwijderen mislukt');
+  selectedReservationState = null;
+  reservationDetailRequestID += 1;
+  document.querySelector('#reservation-detail').classList.add('hidden');
+  document.querySelector('#reservation-empty-state').classList.remove('hidden');
+  await loadReservations();
+  loadDashboardWealth();
+}
+
+function renderReservationDocuments(documents) {
+  if (!documents.length) return '<p>Nog geen documenten gekoppeld.</p>';
+  return `<ul>${documents.map((item) => `<li><div><a href="${apiBaseUrl}/api/v1/documents/${item.id}/content" target="_blank" rel="noopener">${escapeHtml(item.originalFilename)}</a><small>${escapeHtml(item.documentDate || item.mimeType)} &middot; ${formatFileSize(item.sizeBytes)}</small>${renderDocumentTranslation(item)}</div><button type="button" class="icon-button danger" data-reservation-action="unlink-document" data-document-id="${item.id}" aria-label="Verwijder koppeling">&#10005;</button></li>`).join('')}</ul>`;
+}
+
+function renderReservationDocumentOptions(allDocuments, linkedDocuments) {
+  const linkedIDs = new Set(linkedDocuments.map((item) => item.id));
+  const available = allDocuments.filter((item) => !linkedIDs.has(item.id));
+  const form = document.querySelector('#reservation-document-link-form');
+  form.elements.documentId.innerHTML = available.length ? `<option value="">Kies een document</option>${available.map((item) => `<option value="${item.id}">${escapeHtml(item.originalFilename)}</option>`).join('')}` : '<option value="">Geen andere documenten beschikbaar</option>';
+  form.elements.documentId.disabled = !available.length;
+  form.querySelector('button').disabled = !available.length;
+}
+
+function linkDocumentToReservation(reservationID, documentID) {
+  return fetch(`${apiBaseUrl}/api/v1/reservations/${reservationID}/documents`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ documentId: documentID }) });
+}
+
+async function uploadReservationDocument(event) {
+  event.preventDefault();
+  if (!selectedReservationState) return;
+  const form = event.currentTarget;
+  const reservationID = selectedReservationState.id;
+  const status = document.querySelector('#reservation-document-status');
+  status.textContent = 'Document uploaden...';
+  try {
+    const created = await createDocument(form);
+    const response = await linkDocumentToReservation(reservationID, created.id);
+    if (!response.ok) throw new Error((await response.json()).error || 'Document opgeslagen, maar koppelen mislukt');
+    form.reset();
+    status.textContent = 'Document geupload en gekoppeld.';
+    if (selectedReservationState?.id === reservationID) await loadReservationDetail(reservationID, 'documents');
+  } catch (error) {
+    status.textContent = error.message || 'Uploaden mislukt';
+  }
+}
+
+async function linkExistingReservationDocument(event) {
+  event.preventDefault();
+  if (!selectedReservationState) return;
+  const reservationID = selectedReservationState.id;
+  const documentID = Number(event.currentTarget.elements.documentId.value);
+  if (!documentID) return;
+  const response = await linkDocumentToReservation(reservationID, documentID);
+  if (!response.ok) return window.alert((await response.json()).error || 'Document koppelen mislukt');
+  await loadReservationDetail(reservationID, 'documents');
+}
+
+async function unlinkReservationDocument(documentID) {
+  if (!selectedReservationState) return;
+  const reservationID = selectedReservationState.id;
+  const response = await fetch(`${apiBaseUrl}/api/v1/reservations/${reservationID}/documents/${documentID}`, { method: 'DELETE' });
+  if (!response.ok) return window.alert((await response.json()).error || 'Document ontkoppelen mislukt');
+  await loadReservationDetail(reservationID, 'documents');
+}
+
 function renderLiabilityDocuments(documents) {
   if (!documents.length) return '<p>Nog geen documenten gekoppeld.</p>';
-  return `<ul>${documents.map((item) => `<li><div><a href="${apiBaseUrl}/api/v1/documents/${item.id}/content" target="_blank" rel="noopener">${escapeHtml(item.originalFilename)}</a><small>${escapeHtml(item.documentDate || item.mimeType)} &middot; ${formatFileSize(item.sizeBytes)}</small></div><button type="button" class="icon-button danger" data-liability-action="unlink-document" data-document-id="${item.id}" aria-label="Verwijder koppeling">&#10005;</button></li>`).join('')}</ul>`;
+  return `<ul>${documents.map((item) => `<li><div><a href="${apiBaseUrl}/api/v1/documents/${item.id}/content" target="_blank" rel="noopener">${escapeHtml(item.originalFilename)}</a><small>${escapeHtml(item.documentDate || item.mimeType)} &middot; ${formatFileSize(item.sizeBytes)}</small>${renderDocumentTranslation(item)}</div><button type="button" class="icon-button danger" data-liability-action="unlink-document" data-document-id="${item.id}" aria-label="Verwijder koppeling">&#10005;</button></li>`).join('')}</ul>`;
 }
 
 function renderLiabilityDocumentOptions(allDocuments, linkedDocuments) {
@@ -2767,7 +3159,7 @@ async function deleteSelectedCase() {
 
 function renderCaseDocuments(documents) {
   if (!documents.length) return '<p>Nog geen documenten gekoppeld.</p>';
-  return `<ul>${documents.map((item) => `<li><div><a href="${apiBaseUrl}/api/v1/documents/${item.id}/content" target="_blank" rel="noopener">${escapeHtml(item.originalFilename)}</a><small>${escapeHtml(item.documentDate || item.mimeType || '')}${item.sizeBytes == null ? '' : ` &middot; ${formatFileSize(item.sizeBytes)}`}</small>${item.description ? `<span>${escapeHtml(item.description)}</span>` : ''}</div><button type="button" class="icon-button danger" data-case-action="unlink-document" data-document-id="${item.id}" aria-label="Verwijder koppeling">&#10005;</button></li>`).join('')}</ul>`;
+  return `<ul>${documents.map((item) => `<li><div><a href="${apiBaseUrl}/api/v1/documents/${item.id}/content" target="_blank" rel="noopener">${escapeHtml(item.originalFilename)}</a><small>${escapeHtml(item.documentDate || item.mimeType || '')}${item.sizeBytes == null ? '' : ` &middot; ${formatFileSize(item.sizeBytes)}`}</small>${item.description ? `<span>${escapeHtml(item.description)}</span>` : ''}${renderDocumentTranslation(item)}</div><button type="button" class="icon-button danger" data-case-action="unlink-document" data-document-id="${item.id}" aria-label="Verwijder koppeling">&#10005;</button></li>`).join('')}</ul>`;
 }
 
 function renderCaseDocumentOptions(allDocuments, linkedDocuments, unavailable = false) {
@@ -3174,6 +3566,7 @@ function activateWealthSection(target) {
   document.querySelectorAll('.wealth-section').forEach((section) => section.classList.toggle('active', section.dataset.wealthSection === target));
   if (target === 'assets' && !assetsLoaded) loadAssets();
   if (target === 'liabilities' && !liabilitiesLoaded) loadLiabilities();
+  if (target === 'reservations' && !reservationsLoaded) loadReservations();
 }
 
 async function loadSystemConfiguration(force = false) {
@@ -3234,6 +3627,7 @@ function renderSystemConfiguration(configuration, statusMessage = '') {
   };
   const mysql = database.mysql || { host: '', port: 3306, name: '', user: '', tlsMode: 'required', passwordSet: false };
   const objects = configuration.objects || {};
+  const llm = configuration.llm || {};
   const profiles = [
     ['local', 'Lokale computer', 'Voor gebruik op een enkele computer'],
     ['server', 'Eigen server', 'Voor een eigen beheerde server'],
@@ -3273,7 +3667,7 @@ function renderSystemConfiguration(configuration, statusMessage = '') {
           <label>TLS-modus <select name="postgresTlsMode">${tlsOptions([['disable', 'Uitgeschakeld'], ['require', 'Vereist'], ['verify-ca', 'CA verifieren'], ['verify-full', 'CA en host verifieren']], postgres.tlsMode)}</select></label>
           <label class="secret-field">Wachtwoord ${secretStatus(postgres.passwordSet)}<input name="postgresPassword" type="password" value="" autocomplete="new-password" placeholder="Leeg laten om huidig wachtwoord te behouden" /></label>
         </div>
-        <div class="system-fields ${database.backend === 'sqlite' ? '' : 'hidden'}" data-database-fields="sqlite"><label>Absoluut databasepad <input name="sqlitePath" type="text" value="${systemValue(sqlite.path)}" placeholder="/app/data/sqlite/geldzaken.db" /></label></div>
+        <div class="system-fields ${database.backend === 'sqlite' ? '' : 'hidden'}" data-database-fields="sqlite"><label>Absoluut databasepad <input name="sqlitePath" type="text" value="${systemValue(sqlite.path)}" placeholder="/app/data/sqlite/hohoho.db" /></label></div>
         <div class="system-fields ${database.backend === 'mysql' ? '' : 'hidden'}" data-database-fields="mysql">
           <label>Host <input name="mysqlHost" type="text" value="${systemValue(mysql.host)}" /></label>
           <label>Poort <input name="mysqlPort" type="number" min="1" max="65535" value="${systemValue(mysql.port || 3306)}" /></label>
@@ -3301,6 +3695,15 @@ function renderSystemConfiguration(configuration, statusMessage = '') {
           <label class="secret-field">Secret key ${secretStatus(objects.secretKeySet)}<input name="objectsSecretKey" type="password" value="" autocomplete="new-password" placeholder="Leeg laten om huidige sleutel te behouden" /></label>
         </div>
         <div class="system-fields ${objects.backend === 'filesystem' ? '' : 'hidden'}" data-object-fields="filesystem"><label>Opslagpad <input name="objectsPath" type="text" value="${systemValue(objects.path)}" /></label></div>
+      </fieldset>
+      <fieldset ${disabled}>
+        <legend>Lokale LLM</legend>
+        <p class="system-config-explanation">Deze instellingen worden opgeslagen voor toekomstige documentanalyse en transactieclassificatie. De automatisering is nog niet actief.</p>
+        <div class="system-fields">
+          <label>HTTP(S)-endpoint <input name="llmEndpoint" type="url" value="${systemValue(llm.endpoint)}" placeholder="http://192.168.178.215:8080" /></label>
+          <label class="system-checkbox"><input name="llmDocumentMetadata" type="checkbox" ${llm.documentMetadata ? 'checked' : ''} /> Tekstuele documenten naar het Nederlands vertalen</label>
+          <label class="system-checkbox"><input name="llmTransactionClassify" type="checkbox" ${llm.transactionClassify ? 'checked' : ''} /> Banktransacties bij import classificeren</label>
+        </div>
       </fieldset>
       ${readOnly ? '' : '<button type="submit" class="system-save-button">Systeemconfiguratie opslaan</button>'}
     </form>`;
@@ -3350,6 +3753,11 @@ async function saveSystemConfiguration(event) {
       region: form.elements.objectsRegion.value, useTLS: form.elements.objectsUseTLS.checked,
       pathStyle: form.elements.objectsPathStyle.checked, createBucket: form.elements.objectsCreateBucket.checked,
     } : { backend: objectBackend, path: form.elements.objectsPath.value },
+    llm: {
+      endpoint: form.elements.llmEndpoint.value,
+      documentMetadata: form.elements.llmDocumentMetadata.checked,
+      transactionClassify: form.elements.llmTransactionClassify.checked,
+    },
   };
   if (form.dataset.databaseContract === 'v2') {
     input.database.postgres = {
@@ -3422,7 +3830,7 @@ function renderBackupConfiguration(data, message = '') {
       <fieldset ${data.running ? 'disabled' : ''}>
         <legend>Doelopslag</legend>
         <div class="system-fields backup-fields">
-          <label>Rclone-doel <input name="repository" type="text" value="${escapeHtml(data.repository || '')}" placeholder="remote:geldzaken-backups" required /></label>
+          <label>Rclone-doel <input name="repository" type="text" value="${escapeHtml(data.repository || '')}" placeholder="remote:hohoho-backups" required /></label>
           <label class="secret-field">Restic-wachtwoord ${secretStatus(data.resticPasswordSet)}<input name="resticPassword" type="password" autocomplete="new-password" placeholder="${data.resticPasswordSet ? 'Leeg laten om huidig wachtwoord te behouden' : 'Sterk herstelwachtwoord'}" ${data.resticPasswordSet ? '' : 'required'} /></label>
           <label class="backup-rclone-config">Rclone-configuratie ${secretStatus(data.rcloneConfigSet)}<textarea name="rcloneConfig" rows="12" placeholder="[remote]&#10;type = s3&#10;..." ${data.rcloneConfigSet ? '' : 'required'}></textarea><small>Gebruik de configuratie van een bestaande rclone-remote. Deze bevat meestal geheime toegangsgegevens.</small></label>
         </div>
