@@ -1,10 +1,10 @@
 # AGENTS.md
 
-Personal-finance app ("Geldzaken").
+Household administration app ("HoHoHo", House Hold Hosting).
 
 The active application is the root Go module with `cmd/api` as the backend entrypoint and `web/` as the Vite frontend.
 
-The application supports configurable storage profiles. The current Compose baseline uses PostgreSQL for structured data and S3-compatible object storage for original document objects. MinIO is only the local Compose S3-compatible provider; Garage and other S3-compatible providers are supported through the generic `S3_*` configuration.
+The application supports configurable storage profiles. The current Compose baseline uses PostgreSQL for structured data and S3-compatible object storage for original document objects. Garage and other S3-compatible providers are supported through the generic `S3_*` configuration.
 
 ## Current architecture
 
@@ -17,9 +17,6 @@ The application supports configurable storage profiles. The current Compose base
 - `web/` is the real frontend.
 - `migrations/` contains PostgreSQL migrations.
 - `compose.yml` is the current Docker Compose runtime definition.
-- `docker-compose.yml` is a legacy PostgreSQL-only helper and is not the current full runtime definition.
-- `backend/` is an older temporary stub and is not the current application backend.
-- `frontend/` is not used by the current application.
 - PostgreSQL is the default Compose database backend; SQLite and MySQL are supported store implementations and must remain behaviorally consistent where enabled.
 - S3-compatible object storage or the filesystem stores original document objects; the relational database stores their metadata and links.
 
@@ -34,10 +31,10 @@ The application supports configurable storage profiles. The current Compose base
 
   `docker compose up --build -d`
 
-- Compose builds the real application from the repository-root `Dockerfile`, not `backend/Dockerfile`.
+- Compose builds the real application from the repository-root `Dockerfile`.
 - The API serves the built frontend from `WEB_DIR` on port `8080`.
-- PostgreSQL and the local S3-compatible MinIO service are available on the `geldzaken-backend` Docker network.
-- The application uses PostgreSQL through `STORE_BACKEND=postgres` by default and object storage through provider-neutral `S3_*` configuration. Legacy `MINIO_*` variables may remain as Compose convenience values.
+- PostgreSQL is available on the `hohoho-backend` Docker network; a configured S3-compatible provider is used for object storage.
+- The application uses PostgreSQL through `STORE_BACKEND=postgres` by default and object storage through provider-neutral `S3_*` configuration.
 - Persistent runtime data is stored outside the application container.
 
 ## Backend
@@ -47,14 +44,13 @@ The application supports configurable storage profiles. The current Compose base
 - Preserve existing package boundaries unless there is a concrete reason to change them.
 - Keep UI-facing strings and log messages in Dutch where that convention already exists.
 - Do not introduce a second application backend.
-- Do not move active application logic into `backend/`.
 
 ## Frontend
 
 - `web/` is the real frontend.
 - The frontend is built with Vite.
 - Production frontend assets are served by the Go application.
-- Do not create a separate frontend application under `frontend/`.
+- Do not create a separate frontend application.
 - Do not change frontend behavior unless required by the task.
 
 ## Database
@@ -79,7 +75,7 @@ The application supports configurable storage profiles. The current Compose base
 
 - Migrate incrementally.
 - Leave the application in a working state after every migration step.
-- Separate deployment changes from functional/data-model migrations where practical.
+- Separate runtime/deployment changes from functional/data-model migrations where practical.
 - Prefer a modular monolith over microservices.
 - Do not introduce additional infrastructure components unless they solve a concrete requirement.
 - Prefer existing relational database capabilities before introducing additional databases, search engines or queues.

@@ -2,15 +2,15 @@
 set -eu
 
 mkdir -p bin
-go build -o bin/geldzaken-api ./cmd/api
+go build -o bin/hohoho-api ./cmd/api
 
 export APP_ENV=development
 export HTTP_ADDR=127.0.0.1:18080
 export STORE_BACKEND=sqlite
-export DATABASE_PATH="/tmp/opencode/geldzaken-check-$$.db"
+export DATABASE_PATH="/tmp/opencode/hohoho-check-$$.db"
 export CORS_ORIGIN=http://localhost:5173
 
-bin/geldzaken-api &
+bin/hohoho-api &
 pid=$!
 trap 'kill "$pid" 2>/dev/null || true' EXIT INT TERM
 

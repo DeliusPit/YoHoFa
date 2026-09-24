@@ -18,7 +18,7 @@ type Store interface {
 	Delete(context.Context, string) error
 }
 
-type MinIO struct {
+type S3 struct {
 	mu           sync.Mutex
 	client       *minio.Client
 	endpoint     string
@@ -42,19 +42,19 @@ type Config struct {
 	CreateBucket bool
 }
 
-func Open(ctx context.Context, cfg Config) (*MinIO, error) {
-	store := &MinIO{endpoint: cfg.Endpoint, accessKey: cfg.AccessKey, secretKey: cfg.SecretKey, bucket: cfg.Bucket, useSSL: cfg.UseTLS, region: cfg.Region, pathStyle: cfg.PathStyle, createBucket: cfg.CreateBucket}
+func Open(ctx context.Context, cfg Config) (*S3, error) {
+	store := &S3{endpoint: cfg.Endpoint, accessKey: cfg.AccessKey, secretKey: cfg.SecretKey, bucket: cfg.Bucket, useSSL: cfg.UseTLS, region: cfg.Region, pathStyle: cfg.PathStyle, createBucket: cfg.CreateBucket}
 	if cfg.Endpoint == "" || cfg.AccessKey == "" || cfg.SecretKey == "" || cfg.Bucket == "" {
 		return store, fmt.Errorf("S3 configuration is incomplete")
 	}
 	return store, store.checkBucket(ctx)
 }
 
-func (s *MinIO) Ping(ctx context.Context) error {
+func (s *S3) Ping(ctx context.Context) error {
 	return s.checkBucket(ctx)
 }
 
-func (s *MinIO) Put(ctx context.Context, objectKey string, data []byte, contentType string) error {
+func (s *S3) Put(ctx context.Context, objectKey string, data []byte, contentType string) error {
 	client, err := s.readyClient(ctx)
 	if err != nil {
 		return err
@@ -63,7 +63,7 @@ func (s *MinIO) Put(ctx context.Context, objectKey string, data []byte, contentT
 	return err
 }
 
-func (s *MinIO) Get(ctx context.Context, objectKey string) (io.ReadCloser, error) {
+func (s *S3) Get(ctx context.Context, objectKey string) (io.ReadCloser, error) {
 	client, err := s.readyClient(ctx)
 	if err != nil {
 		return nil, err
@@ -79,7 +79,7 @@ func (s *MinIO) Get(ctx context.Context, objectKey string) (io.ReadCloser, error
 	return object, nil
 }
 
-func (s *MinIO) Delete(ctx context.Context, objectKey string) error {
+func (s *S3) Delete(ctx context.Context, objectKey string) error {
 	client, err := s.readyClient(ctx)
 	if err != nil {
 		return err
@@ -87,7 +87,7 @@ func (s *MinIO) Delete(ctx context.Context, objectKey string) error {
 	return client.RemoveObject(ctx, s.bucket, objectKey, minio.RemoveObjectOptions{})
 }
 
-func (s *MinIO) readyClient(ctx context.Context) (*minio.Client, error) {
+func (s *S3) readyClient(ctx context.Context) (*minio.Client, error) {
 	if err := s.checkBucket(ctx); err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (s *MinIO) readyClient(ctx context.Context) (*minio.Client, error) {
 	return s.client, nil
 }
 
-func (s *MinIO) checkBucket(ctx context.Context) error {
+func (s *S3) checkBucket(ctx context.Context) error {
 	client, err := s.getClient()
 	if err != nil {
 		return err
@@ -119,7 +119,7 @@ func (s *MinIO) checkBucket(ctx context.Context) error {
 	return nil
 }
 
-func (s *MinIO) getClient() (*minio.Client, error) {
+func (s *S3) getClient() (*minio.Client, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.client != nil {

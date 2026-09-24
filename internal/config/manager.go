@@ -69,10 +69,17 @@ type ObjectInput struct {
 	CreateBucket bool    `json:"createBucket"`
 }
 
+type LLMInput struct {
+	Endpoint            string `json:"endpoint"`
+	DocumentMetadata    bool   `json:"documentMetadata"`
+	TransactionClassify bool   `json:"transactionClassify"`
+}
+
 type Update struct {
 	Profile  string        `json:"profile"`
 	Database DatabaseInput `json:"database"`
 	Objects  ObjectInput   `json:"objects"`
+	LLM      *LLMInput     `json:"llm,omitempty"`
 }
 
 type DatabaseView struct {
@@ -123,10 +130,17 @@ type ObjectView struct {
 	CreateBucket bool   `json:"createBucket"`
 }
 
+type LLMView struct {
+	Endpoint            string `json:"endpoint"`
+	DocumentMetadata    bool   `json:"documentMetadata"`
+	TransactionClassify bool   `json:"transactionClassify"`
+}
+
 type SettingsView struct {
 	Profile  string       `json:"profile"`
 	Database DatabaseView `json:"database"`
 	Objects  ObjectView   `json:"objects"`
+	LLM      LLMView      `json:"llm"`
 }
 
 type Capability struct {
@@ -190,6 +204,11 @@ type diskConfig struct {
 			CreateBucket bool   `json:"createBucket"`
 		} `json:"s3"`
 	} `json:"object"`
+	LLM struct {
+		Endpoint            string `json:"endpoint"`
+		DocumentMetadata    bool   `json:"documentMetadata"`
+		TransactionClassify bool   `json:"transactionClassify"`
+	} `json:"llm,omitempty"`
 }
 
 type Manager struct {
@@ -218,11 +237,11 @@ func NewManager(environment Config) (*Manager, error) {
 		if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("read configuration file: invalid configuration")
 		}
-		if persisted.Version != 0 && persisted.Version != 2 {
+		if persisted.Version != 0 && persisted.Version != 2 && persisted.Version != 3 {
 			return nil, fmt.Errorf("read configuration file: unsupported configuration version")
 		}
 		loaded := persisted.apply(environment)
-		if persisted.Version == 2 {
+		if persisted.Version == 2 || persisted.Version == 3 {
 			loaded = normalizeV2DatabaseConfig(loaded)
 			if err := validateRetainedDatabases(loaded); err != nil {
 				return nil, err
@@ -333,6 +352,11 @@ func (input Update) config(base Config) (Config, error) {
 	next.StorageProfile = strings.TrimSpace(input.Profile)
 	next.StoreBackend = strings.TrimSpace(input.Database.Backend)
 	next.ObjectBackend = strings.TrimSpace(input.Objects.Backend)
+	if input.LLM != nil {
+		next.LLMEndpoint = strings.TrimSpace(input.LLM.Endpoint)
+		next.LLMDocumentMetadata = input.LLM.DocumentMetadata
+		next.LLMTransactionClassify = input.LLM.TransactionClassify
+	}
 	if path := strings.TrimSpace(input.Objects.Path); next.ObjectBackend == "filesystem" || path != "" {
 		next.ObjectFilesystemRoot = path
 	}
@@ -396,7 +420,30 @@ func validate(cfg Config) error {
 	if err := validateCombination(cfg); err != nil {
 		return ErrInvalid
 	}
-	return validateObjectStore(cfg)
+	if err := validateObjectStore(cfg); err != nil {
+		return err
+	}
+	return validateLLM(cfg)
+}
+
+func validateLLM(cfg Config) error {
+	if cfg.LLMEndpoint == "" {
+		if cfg.LLMDocumentMetadata || cfg.LLMTransactionClassify {
+			return ErrInvalid
+		}
+		return nil
+	}
+	endpoint, err := url.Parse(cfg.LLMEndpoint)
+	if err != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.Hostname() == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		return ErrInvalid
+	}
+	if port := endpoint.Port(); port != "" {
+		value, err := strconv.Atoi(port)
+		if err != nil || value < 1 || value > 65535 {
+			return ErrInvalid
+		}
+	}
+	return nil
 }
 
 func validateCombination(cfg Config) error {
@@ -494,6 +541,7 @@ func safeView(cfg Config) SettingsView {
 		Profile:  cfg.StorageProfile,
 		Database: database,
 		Objects:  ObjectView{Backend: cfg.ObjectBackend, Path: cfg.ObjectFilesystemRoot, Endpoint: cfg.S3Endpoint, AccessKeySet: cfg.S3AccessKey != "", SecretKeySet: cfg.S3SecretKey != "", Bucket: cfg.S3Bucket, UseTLS: cfg.S3UseTLS, Region: cfg.S3Region, PathStyle: cfg.S3PathStyle, CreateBucket: cfg.S3CreateBucket},
+		LLM:      LLMView{Endpoint: cfg.LLMEndpoint, DocumentMetadata: cfg.LLMDocumentMetadata, TransactionClassify: cfg.LLMTransactionClassify},
 	}
 }
 
@@ -660,7 +708,7 @@ func databasePassword(rawURL string) string {
 func diskFromConfig(cfg Config) diskConfig {
 	cfg = normalizeDatabaseConfig(cfg)
 	var persisted diskConfig
-	persisted.Version = 2
+	persisted.Version = 3
 	persisted.StorageProfile = cfg.StorageProfile
 	persisted.Database.Backend = cfg.StoreBackend
 	persisted.Database.SQLite.Path = cfg.DatabasePath
@@ -681,6 +729,9 @@ func diskFromConfig(cfg Config) diskConfig {
 	persisted.Object.S3.Region = cfg.S3Region
 	persisted.Object.S3.PathStyle = cfg.S3PathStyle
 	persisted.Object.S3.CreateBucket = cfg.S3CreateBucket
+	persisted.LLM.Endpoint = cfg.LLMEndpoint
+	persisted.LLM.DocumentMetadata = cfg.LLMDocumentMetadata
+	persisted.LLM.TransactionClassify = cfg.LLMTransactionClassify
 	return persisted
 }
 
@@ -711,6 +762,11 @@ func (persisted diskConfig) apply(base Config) Config {
 	base.S3Region = persisted.Object.S3.Region
 	base.S3PathStyle = persisted.Object.S3.PathStyle
 	base.S3CreateBucket = persisted.Object.S3.CreateBucket
+	if persisted.Version >= 3 {
+		base.LLMEndpoint = persisted.LLM.Endpoint
+		base.LLMDocumentMetadata = persisted.LLM.DocumentMetadata
+		base.LLMTransactionClassify = persisted.LLM.TransactionClassify
+	}
 	return base
 }
 
@@ -777,7 +833,7 @@ func readConfigFile(path string) ([]byte, bool, error) {
 }
 
 func storageEnvironmentConfigured() bool {
-	keys := []string{"STORAGE_PROFILE", "DATABASE_BACKEND", "STORE_BACKEND", "DATABASE_URL", "DATABASE_PATH", "DATABASE_DATA_ROOT", "MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_TLS_MODE", "OBJECT_BACKEND", "OBJECT_FILESYSTEM_ROOT", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET", "S3_USE_TLS", "S3_REGION", "S3_PATH_STYLE", "S3_CREATE_BUCKET", "MINIO_ENDPOINT", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY", "MINIO_BUCKET", "MINIO_USE_SSL"}
+	keys := []string{"STORAGE_PROFILE", "DATABASE_BACKEND", "STORE_BACKEND", "DATABASE_URL", "DATABASE_PATH", "DATABASE_DATA_ROOT", "MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_TLS_MODE", "OBJECT_BACKEND", "OBJECT_FILESYSTEM_ROOT", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET", "S3_USE_TLS", "S3_REGION", "S3_PATH_STYLE", "S3_CREATE_BUCKET", "LLM_ENDPOINT", "LLM_DOCUMENT_METADATA", "LLM_TRANSACTION_CLASSIFY"}
 	for _, key := range keys {
 		if os.Getenv(key) != "" {
 			return true

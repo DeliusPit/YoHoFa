@@ -8,10 +8,10 @@ Deze applicatie ondersteunt drie opslagprofielen:
 
 ## Schema's en migraties
 
-PostgreSQL heeft twee mechanismen die bewust naast elkaar bestaan:
+PostgreSQL heeft twee elkaar aanvullende mechanismen:
 
-- `migrations/*.sql` zijn de expliciete migraties en vormen de primaire historische bron voor PostgreSQL-schemawijzigingen.
-- `internal/store/postgres.go` bevat een idempotente startup-reconciler (`postgresSchema`) zodat bestaande installaties veilig naar het huidige schema kunnen worden bijgewerkt bij applicatiestart.
+- `migrations/*.sql` zijn expliciete, uitvoerbare upgrades voor beheerde PostgreSQL-installaties.
+- `internal/store/postgres.go` bevat de idempotente startup-reconciler (`postgresSchema`). Die brengt applicatiegestarte installaties naar hetzelfde schema en registreert dezelfde migratieversies.
 
 SQLite en MySQL hebben eigen idempotente schema-initialisatie in code. Elke domeinwijziging moet daarom in alle actieve relationele stores worden doorgevoerd en met parity-tests worden gecontroleerd.
 
@@ -24,14 +24,14 @@ De belangrijkste parity-gebieden zijn:
 - accounts, categorieen, transacties en rapporten;
 - documentenmetadata en documentrelaties;
 - assets, liabilities en cases;
-- `entity_relations` en `domain_events`;
+- `entity_relations`, `domain_events` en reservations;
 - importdeduplicatie en handmatige transacties.
 
 ## Objectopslag
 
 Documentmetadata staat altijd in de relationele database. Originele documentobjecten staan in filesystem-opslag of S3-compatible opslag.
 
-Voor S3-compatible opslag gebruikt de applicatie de provider-neutrale `S3_*`-instellingen. MinIO is alleen de lokale Compose-provider. Garage hoort met path-style lookup te draaien en meestal met vooraf aangemaakte buckets:
+Voor S3-compatible opslag gebruikt de applicatie uitsluitend de provider-neutrale `S3_*`-instellingen. Garage hoort met path-style lookup te draaien en meestal met vooraf aangemaakte buckets:
 
 ```text
 S3_ENDPOINT=garage.example.nl:3900
@@ -48,7 +48,7 @@ Configuratiewijzigingen migreren geen data. Ze wijzigen alleen welke backend bij
 
 Ondersteund of gepland:
 
-- SQLite naar PostgreSQL: `cmd/migrate-sqlite-postgres` bestaat voor de kerngegevens.
+- SQLite naar PostgreSQL: `cmd/migrate-sqlite-postgres` migreert alleen kerngegevens en weigert een bron met documenten of andere domeingegevens, zodat geen data stilzwijgend verloren gaat.
 - SQLite naar MySQL: nog niet geimplementeerd.
 - PostgreSQL naar MySQL of MySQL naar PostgreSQL: nog niet geimplementeerd.
 - Filesystem naar S3/Garage of S3/Garage naar filesystem: nog niet geimplementeerd.

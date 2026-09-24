@@ -1,10 +1,10 @@
-# Geldzaken
+# HoHoHo
 
-Applicatie-opbouw voor persoonlijke geldzaken van een huishouden.
+House Hold Hosting: applicatie-opbouw voor de administratie van een huishouden.
 
 ## Doel
 
-Een zo veel mogelijk in Go geschreven applicatie met een kleine JavaScript frontend, configureerbare opslag en deployment naar een LXC-container op een Proxmox-cluster.
+Een zo veel mogelijk in Go geschreven applicatie met een kleine JavaScript frontend en configureerbare opslag.
 
 ## Stack
 
@@ -14,7 +14,7 @@ Een zo veel mogelijk in Go geschreven applicatie met een kleine JavaScript front
 - Geconfigureerde databasekeuzes: PostgreSQL, SQLite en MySQL
 - PostgreSQL schema: SQL-bestanden in `migrations/` en schema-check bij starten
 - Lokaal draaien: Go API + Vite frontend
-- Deployment: build artifact + systemd service in LXC
+- Deployment: Docker Compose met PostgreSQL en S3-compatible objectopslag
 
 ## Structuur
 
@@ -24,7 +24,6 @@ Een zo veel mogelijk in Go geschreven applicatie met een kleine JavaScript front
 - `internal/store`: data-opslag via SQLite, PostgreSQL, MySQL of memory-store
 - `migrations`: database schema migraties
 - `web`: frontend
-- `deploy`: systemd en Proxmox/LXC deployment-opbouw
 - `scripts`: hulpscripts voor lokale en remote taken
 
 ## Lokaal ontwikkelen met PostgreSQL
@@ -79,9 +78,7 @@ Controleer de draaiende applicatie daarna met:
 ./scripts/check-runtime.sh
 ```
 
-PostgreSQL-data staat onder `data/postgres`; de lokale MinIO-service gebruikt `data/minio`; SQLite-bestanden staan onder `data/sqlite` en objecten van de filesystem-backend onder `data/objects`. MinIO is hier alleen een lokale S3-compatible provider. Voor productie kan dezelfde S3-laag ook naar Garage of een andere S3-compatible dienst wijzen. SQLite-paden moeten absoluut zijn, mogen geen URI of `/` zijn en blijven in Compose beperkt tot `/app/data/sqlite` via `DATABASE_DATA_ROOT`.
-
-Let op: `docker-compose.yml` is een oude PostgreSQL-only helper. Gebruik voor de actuele applicatiestack `compose.yml`.
+PostgreSQL-data staat onder `data/postgres`; SQLite-bestanden staan onder `data/sqlite` en objecten van de filesystem-backend onder `data/objects`. Voor S3-opslag configureert u een S3-compatible provider, zoals Garage. SQLite-paden moeten absoluut zijn, mogen geen URI of `/` zijn en blijven in Compose beperkt tot `/app/data/sqlite` via `DATABASE_DATA_ROOT`.
 
 De optionele MySQL 8.4-service start niet standaard. Vul de vier `MYSQL_*`-waarden uit `.env.example` in en start hem alleen met:
 
@@ -93,7 +90,7 @@ De persistente MySQL-data staat onder `data/mysql`. Poort 3306 is uitsluitend op
 
 ## Documenten
 
-Documentmetadata en koppelingen staan in de geconfigureerde relationele database. De originele bestanden kunnen in S3-compatibele objectopslag of op het lokale bestandssysteem staan. Compose koppelt het bestandssysteem standaard aan `/app/data/objects`; dit pad moet absoluut zijn en mag niet `/` zijn. Voor S3 gebruikt de applicatie `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_USE_TLS`, `S3_REGION`, `S3_PATH_STYLE` en `S3_CREATE_BUCKET`. MinIO blijft als lokale Compose-service beschikbaar om de S3-laag lokaal te testen.
+Documentmetadata en koppelingen staan in de geconfigureerde relationele database. De originele bestanden kunnen in S3-compatibele objectopslag of op het lokale bestandssysteem staan. Compose koppelt het bestandssysteem standaard aan `/app/data/objects`; dit pad moet absoluut zijn en mag niet `/` zijn. Voor S3 gebruikt de applicatie `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_USE_TLS`, `S3_REGION`, `S3_PATH_STYLE` en `S3_CREATE_BUCKET`.
 
 Voor Garage bevat `S3_ENDPOINT` alleen `host:poort`, zonder `http://` of pad. Stel `S3_REGION` in op de regio van de Garage-key, gebruik normaal `S3_PATH_STYLE=true` en zet `S3_CREATE_BUCKET=false` wanneer de bucket vooraf in Garage is aangemaakt.
 
@@ -101,7 +98,7 @@ Zie `docs/storage-architecture.md` voor de opslagmatrix, schema-aanpak, parity-c
 
 ### Opslagconfiguratie
 
-`config/storage.json` op de host, gekoppeld als `/app/config/storage.json`, is de gezaghebbende opslagconfiguratie. Het bestand bevat database- en objectopslagcredentials en is daarom geheim: maak geen commit of backup zonder passende versleuteling en toegangsbeperking. Als het bestand bestaat, wint het volledig van alle legacy opslagvariabelen; velden worden nooit afzonderlijk met environment variables samengevoegd. De root `.env` bevat alleen Compose-credentials voor de lokale PostgreSQL-, optionele MySQL- en MinIO-services. Productie-authenticatie en optionele providerneutrale bootstrapwaarden staan lokaal in `config/.env`, gebaseerd op `config/.env.example`, met bestandsmodus `0600`. Zonder zowel `AUTH_USERNAME` als `AUTH_PASSWORD` start de productiebackend niet.
+`config/storage.json` op de host, gekoppeld als `/app/config/storage.json`, is de gezaghebbende opslagconfiguratie. Het bestand bevat database- en objectopslagcredentials en is daarom geheim: maak geen commit of backup zonder passende versleuteling en toegangsbeperking. Als het bestand bestaat, wint het volledig van de opslagvariabelen; velden worden nooit afzonderlijk met environment variables samengevoegd. De root `.env` bevat alleen Compose-credentials voor de lokale PostgreSQL- en optionele MySQL-service. Productie-authenticatie en optionele providerneutrale bootstrapwaarden staan lokaal in `config/.env`, gebaseerd op `config/.env.example`, met bestandsmodus `0600`. Zonder zowel `AUTH_USERNAME` als `AUTH_PASSWORD` start de productiebackend niet.
 
 Voor een eenmalige omzetting van de huidige Compose-variabelen naar het bestand gebruikt u exact:
 
@@ -117,13 +114,13 @@ docker compose -f compose.yml up -d
 
 Zonder bestand blijft de bestaande environment-configuratie alleen-lezen werken wanneer opslagvariabelen aanwezig zijn. In productie zijn zowel `AUTH_USERNAME` als `AUTH_PASSWORD` verplicht; bij een ontbrekende waarde start de backend niet. Met volledige authenticatie staat `CONFIG_EDITABLE=true` wijzigingen via `Configuratie > Systeemconfiguratie` toe. Alleen niet-productieontwikkeling op een loopback-adres mag zonder authenticatie wijzigen; andere niet-productieomgevingen worden zonder volledige authenticatie alleen-lezen. Secrets worden uitsluitend als ingesteld/niet ingesteld getoond. Wijzigingen worden atomisch met bestandsmodus `0600` opgeslagen en gelden na een herstart.
 
-Een succesvolle wijziging schrijft opslagconfiguratieversie 2. Daarin blijven de afzonderlijke SQLite-, PostgreSQL- en MySQL-instellingen bewaard wanneer een andere backend wordt gekozen; hetzelfde geldt voor filesystem- en S3-instellingen. Een bestaand ongenummerd bestand met `database.backend` en `database.url` blijft exact compatibel en wordt pas bij een succesvolle wijziging naar versie 2 geschreven. De veilige GET-API retourneert alleen of wachtwoorden/sleutels zijn ingesteld, nooit de geheimen zelf.
+Een succesvolle wijziging schrijft opslagconfiguratieversie 3. Daarin blijven de afzonderlijke SQLite-, PostgreSQL- en MySQL-instellingen bewaard wanneer een andere backend wordt gekozen; hetzelfde geldt voor filesystem- en S3-instellingen. De lokale LLM-endpoint en de opties voor documentvertaling en transactieclassificatie worden daarin ook bewaard. Documentvertaling verwerkt tekstbestanden en PDF's met ingebedde tekst; scans en afbeeldingen hebben eerst OCR nodig. Transactieclassificatie is nog niet actief. Bestaande versie-2- en ongenummerde bestanden blijven compatibel en worden pas bij een succesvolle wijziging naar versie 3 geschreven. De veilige GET-API retourneert alleen of wachtwoorden/sleutels zijn ingesteld, nooit de geheimen zelf.
 
 De profielen `local`, `server` en `central` zijn ondersteund. `local` combineert SQLite met filesystem-opslag; `server` en `central` combineren PostgreSQL of MySQL met filesystem- of S3-opslag. Alle drie databases implementeren documentenmetadata, assets, liabilities, dossiers, relaties, waarderingen en tijdlijnen. MySQL TLS is beperkt tot `required` (standaard, zonder plaintext fallback) en expliciet `disabled` voor een vertrouwd lokaal netwerk zoals Compose. Eerdere `preferred`-instellingen worden veilig als `required` behandeld. CA-instellingen zijn nog niet geïmplementeerd. Een andere selectie wijzigt alleen de actieve backend en migreert geen bestaande databasegegevens of objecten.
 
 ### Systeembackup
 
-`Configuratie > Systeembackup` maakt handmatig een versleutelde restic-snapshot van de actieve database, documenten en configuratie. Rclone verzorgt de verbinding met de gekozen opslagprovider. Vul als doel een bestaande rclone-remote en pad in, bijvoorbeeld `backup:geldzaken`, samen met de bijbehorende rclone-configuratie en een afzonderlijk restic-wachtwoord. Opslaan valideert de opslag en initialiseert uitsluitend een lege doelmap; de knop `Nu backup maken` wordt pas daarna actief.
+`Configuratie > Systeembackup` maakt handmatig een versleutelde restic-snapshot van de actieve database, documenten en configuratie. Rclone verzorgt de verbinding met de gekozen opslagprovider. Vul als doel een bestaande rclone-remote en pad in, bijvoorbeeld `backup:hohoho`, samen met de bijbehorende rclone-configuratie en een afzonderlijk restic-wachtwoord. Opslaan valideert de opslag en initialiseert uitsluitend een lege doelmap; de knop `Nu backup maken` wordt pas daarna actief.
 
 De backupinstellingen staan met bestandsmodus `0600` in `config/backup.json`. Dit bestand bevat de rclone-configuratie en het restic-wachtwoord en mag niet ongecodeerd buiten het systeem worden bewaard. Bewaar het restic-wachtwoord daarnaast in een afzonderlijke herstelkluis: zonder dat wachtwoord kunnen snapshots niet worden hersteld. Gebruik voor S3 altijd een andere bucket dan de live documentenbucket; de applicatie blokkeert een rechtstreeks geconfigureerde overlap.
 
@@ -133,8 +130,8 @@ Als de webinterface niet start, is hetzelfde herstel als onderhoudscommando besc
 
 ```sh
 docker compose stop backend
-docker compose run --rm --no-deps --entrypoint /app/geldzaken-recover backend --list
-docker compose run --rm --no-deps --entrypoint /app/geldzaken-recover backend --snapshot SNAPSHOT_ID
+docker compose run --rm --no-deps --entrypoint /app/hohoho-recover backend --list
+docker compose run --rm --no-deps --entrypoint /app/hohoho-recover backend --snapshot SNAPSHOT_ID
 docker compose up -d backend
 ```
 
@@ -172,7 +169,7 @@ De initiële database-opbouw bevat:
 - subcategorieen
 - transacties
 
-SQLite bewaart dit standaard in `data/geldzaken.db`. De belangrijkste tabellen zijn:
+SQLite bewaart dit standaard in `data/hohoho.db`. De belangrijkste tabellen zijn:
 
 - `accounts`: bankrekeningen met naam, IBAN, type, eigenaar en bankprofiel
 - `main_categories`: hoofdcategorieen zoals Wonen, Huishouden en Vervoer
@@ -201,14 +198,3 @@ samples/bankimport/generic.csv
 ```
 
 Meer details staan in `docs/bankimport.md`.
-
-## Deployment richting LXC/Proxmox
-
-Zie `deploy/proxmox/README.md` voor de beoogde flow. De basis is:
-
-1. Maak een Debian/Ubuntu LXC aan in Proxmox.
-2. Installeer Go in de container en zorg voor SSH-toegang.
-3. Draai lokaal `LXC_HOST=<ip> AUTH_PASSWORD='<wachtwoord>' ./scripts/install-lxc.sh`.
-4. De applicatie draait daarna met SQLite, systemd en HTTP Basic Authentication op poort 8080.
-
-De scripts zijn templates. Vul hostnamen, container-ID's, gebruikers en paden in via environment variables of CI secrets.

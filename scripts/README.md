@@ -8,14 +8,7 @@ Actueel voor de centrale Docker Compose-runtime:
 - `dev-api.sh`: start de API lokaal voor ontwikkeling.
 - `build.sh`: bouwt lokale Go/frontend artifacts wanneer Go en Node lokaal beschikbaar zijn.
 
-Legacy SQLite/LXC-paden:
-
-- `install-lxc.sh`
-- `deploy-lxc.sh`
-- `bootstrap-lxc.sh`
-- `package-runtime.sh`
-
-Deze legacy scripts blijven bestaan voor bestaande lokale/LXC-installaties, maar zijn niet het aanbevolen pad voor de huidige centrale deployment. Gebruik daarvoor:
+Gebruik voor de actuele centrale deployment:
 
 ```sh
 docker compose -f compose.yml up --build -d

@@ -93,6 +93,9 @@ func TestSaveMasksAndRetainsSecretsAndBecomesPending(t *testing.T) {
 	if !view.Pending.Database.PasswordSet || !view.Pending.Objects.AccessKeySet || !view.Pending.Objects.SecretKeySet {
 		t.Fatal("safe view did not report retained secrets")
 	}
+	if view.Pending.LLM.Endpoint != "http://192.168.178.215:8080" || !view.Pending.LLM.DocumentMetadata || !view.Pending.LLM.TransactionClassify {
+		t.Fatalf("LLM configuration was not shown as pending: %+v", view.Pending.LLM)
+	}
 
 	info, err := os.Stat(cfg.ConfigPath)
 	if err != nil {
@@ -115,7 +118,7 @@ func TestSaveMasksAndRetainsSecretsAndBecomesPending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restarted.Effective().S3Endpoint != "new-s3:3900" || restarted.Effective().DatabaseURL == cfg.DatabaseURL {
+	if restarted.Effective().S3Endpoint != "new-s3:3900" || restarted.Effective().DatabaseURL == cfg.DatabaseURL || restarted.Effective().LLMEndpoint != "http://192.168.178.215:8080" || !restarted.Effective().LLMDocumentMetadata || !restarted.Effective().LLMTransactionClassify {
 		t.Fatal("persisted configuration was not applied on restart")
 	}
 }
@@ -300,7 +303,7 @@ func TestSaveRetainsPostgresConnectionParameters(t *testing.T) {
 	clearStorageEnv(t)
 	cfg := testConfig(t)
 	cfg.ConfigEditable = true
-	cfg.DatabaseURL += "&connect_timeout=10&application_name=geldzaken"
+	cfg.DatabaseURL += "&connect_timeout=10&application_name=hohoho"
 	manager, err := NewManager(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +313,7 @@ func TestSaveRetainsPostgresConnectionParameters(t *testing.T) {
 	}
 
 	pending := manager.pending.DatabaseURL
-	if !strings.Contains(pending, "connect_timeout=10") || !strings.Contains(pending, "application_name=geldzaken") || !strings.Contains(pending, "sslmode=require") {
+	if !strings.Contains(pending, "connect_timeout=10") || !strings.Contains(pending, "application_name=hohoho") || !strings.Contains(pending, "sslmode=require") {
 		t.Fatalf("Postgres connection parameters were not retained: %s", pending)
 	}
 }
@@ -351,7 +354,7 @@ func TestSaveRejectsInvalidS3Endpoint(t *testing.T) {
 	}
 }
 
-func TestLegacyConfigurationLoadsWithoutRewriteAndSavesAsV2(t *testing.T) {
+func TestLegacyConfigurationLoadsWithoutRewriteAndSavesAsV3(t *testing.T) {
 	clearStorageEnv(t)
 	cfg := testConfig(t)
 	cfg.ConfigEditable = true
@@ -390,8 +393,32 @@ func TestLegacyConfigurationLoadsWithoutRewriteAndSavesAsV2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(saved), `"version": 2`) || strings.Contains(string(saved), `"url": "postgres://legacy`) {
+	if !strings.Contains(string(saved), `"version": 3`) || strings.Contains(string(saved), `"url": "postgres://legacy`) {
 		t.Fatalf("legacy configuration was not upgraded on save: %s", saved)
+	}
+}
+
+func TestLLMConfigurationRequiresAValidEndpoint(t *testing.T) {
+	clearStorageEnv(t)
+	cfg := testConfig(t)
+	cfg.ConfigEditable = true
+	manager, err := NewManager(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, llm := range []LLMInput{
+		{DocumentMetadata: true},
+		{Endpoint: "192.168.178.215:8080"},
+		{Endpoint: "ftp://192.168.178.215:8080"},
+		{Endpoint: "http://user@192.168.178.215:8080"},
+		{Endpoint: "http://192.168.178.215:70000"},
+		{Endpoint: "http://192.168.178.215:8080?model=local"},
+	} {
+		input := validUpdate()
+		input.LLM = &llm
+		if err := manager.Save(input); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("Save with LLM configuration %+v returned %v, want ErrInvalid", llm, err)
+		}
 	}
 }
 
@@ -627,5 +654,6 @@ func validUpdate() Update {
 		Profile:  "central",
 		Database: DatabaseInput{Backend: "postgres", Host: "new-db", Port: 5432, Name: "money", User: "money", SSLMode: "require"},
 		Objects:  ObjectInput{Backend: "s3", Endpoint: "new-s3:3900", Bucket: "documents", Region: "garage", PathStyle: true},
+		LLM:      &LLMInput{Endpoint: "http://192.168.178.215:8080", DocumentMetadata: true, TransactionClassify: true},
 	}
 }

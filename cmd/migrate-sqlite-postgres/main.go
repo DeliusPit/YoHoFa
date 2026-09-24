@@ -6,12 +6,12 @@ import (
 	"os"
 	"time"
 
-	"geldzaken/internal/store"
+	"hohoho/internal/store"
 )
 
 func main() {
 	if len(os.Args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: migrate-sqlite-postgres <source-sqlite.db> <postgres-url>")
+		fmt.Fprintln(os.Stderr, "usage: migrate-sqlite-postgres <source-sqlite.db> <postgres-url> (core data only; refuses domain data)")
 		os.Exit(2)
 	}
 

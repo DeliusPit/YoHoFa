@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"geldzaken/internal/config"
+	"hohoho/internal/config"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	_ "modernc.org/sqlite"
@@ -33,6 +33,11 @@ var (
 	ErrSnapshotNotFound = errors.New("snapshot not found")
 	remoteNameExpr      = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 	snapshotIDExpr      = regexp.MustCompile(`^[a-fA-F0-9]{8,64}$`)
+)
+
+const (
+	backupTag        = "hohoho-system"
+	sourceRemoteName = "__hohoho_source"
 )
 
 type SettingsInput struct {
@@ -304,14 +309,14 @@ func (s *Service) Snapshots(ctx context.Context) ([]Snapshot, error) {
 		return nil, err
 	}
 	defer cleanup()
-	output, err := commandOutput(ctx, runtime.env, "restic", "snapshots", "--tag", "geldzaken-system", "--json")
-	if err != nil {
-		return nil, fmt.Errorf("repository: %w", err)
-	}
 	var stored []struct {
 		ID      string    `json:"id"`
 		ShortID string    `json:"short_id"`
 		Time    time.Time `json:"time"`
+	}
+	output, err := commandOutput(ctx, runtime.env, "restic", "snapshots", "--tag", backupTag, "--json")
+	if err != nil {
+		return nil, fmt.Errorf("repository: %w", err)
 	}
 	if err := json.Unmarshal(output, &stored); err != nil {
 		return nil, fmt.Errorf("repository: invalid snapshot list")
@@ -408,7 +413,7 @@ func (v settings) valid() error {
 		return ErrInvalid
 	}
 	remote, path, ok := strings.Cut(v.Repository, ":")
-	if !ok || !remoteNameExpr.MatchString(remote) || strings.Trim(path, "/") == "" || strings.Contains(v.RcloneConfig, "[__geldzaken_source]") {
+	if !ok || !remoteNameExpr.MatchString(remote) || strings.Trim(path, "/") == "" || strings.Contains(v.RcloneConfig, "["+sourceRemoteName+"]") {
 		return ErrInvalid
 	}
 	if !strings.Contains(v.RcloneConfig, "["+remote+"]") {
@@ -582,7 +587,7 @@ func (s *Service) run(ctx context.Context, current settings) (string, error) {
 	if err := os.WriteFile(filepath.Join(stage, "manifest.json"), data, 0o600); err != nil {
 		return "", fmt.Errorf("manifest: %w", err)
 	}
-	output, err := commandOutput(ctx, runtime.env, "restic", "backup", stage, "--tag", "geldzaken-system", "--json")
+	output, err := commandOutput(ctx, runtime.env, "restic", "backup", stage, "--tag", backupTag, "--json")
 	if err != nil {
 		return "", fmt.Errorf("restic: %w", err)
 	}
@@ -705,7 +710,7 @@ func (s *Service) restoreDatabase(ctx context.Context, env []string, payload str
 	source := filepath.Join(payload, "database")
 	switch s.cfg.StoreBackend {
 	case "sqlite":
-		return replaceFile(filepath.Join(source, "geldzaken.db"), s.cfg.DatabasePath)
+		return replaceFile(filepath.Join(source, "hohoho.db"), s.cfg.DatabasePath)
 	case "postgres":
 		parsed, err := url.Parse(s.cfg.PostgresURL)
 		if err != nil {
@@ -716,7 +721,7 @@ func (s *Service) restoreDatabase(ctx context.Context, env []string, payload str
 		if port == "" {
 			port = "5432"
 		}
-		args := []string{"--clean", "--if-exists", "--single-transaction", "--no-owner", "--no-privileges", "--host=" + parsed.Hostname(), "--port=" + port, "--username=" + parsed.User.Username(), "--dbname=" + strings.TrimPrefix(parsed.Path, "/"), filepath.Join(source, "geldzaken.pgdump")}
+		args := []string{"--clean", "--if-exists", "--single-transaction", "--no-owner", "--no-privileges", "--host=" + parsed.Hostname(), "--port=" + port, "--username=" + parsed.User.Username(), "--dbname=" + strings.TrimPrefix(parsed.Path, "/"), filepath.Join(source, "hohoho.pgdump")}
 		return commandRun(ctx, append(env, "PGPASSWORD="+password, "PGSSLMODE="+parsed.Query().Get("sslmode")), nil, "pg_restore", args...)
 	case "mysql":
 		parsed, err := mysqlDriver.ParseDSN(s.cfg.MySQLDSN)
@@ -728,7 +733,7 @@ func (s *Service) restoreDatabase(ctx context.Context, env []string, payload str
 			return err
 		}
 		defer os.Remove(defaults)
-		input, err := os.Open(filepath.Join(source, "geldzaken.sql"))
+		input, err := os.Open(filepath.Join(source, "hohoho.sql"))
 		if err != nil {
 			return err
 		}
@@ -757,7 +762,7 @@ func (s *Service) mysqlDefaultsFile(directory string, parsed *mysqlDriver.Config
 func (s *Service) restoreObjects(ctx context.Context, env []string, payload string) error {
 	source := filepath.Join(payload, "objects")
 	if s.cfg.ObjectBackend == "s3" {
-		return commandRun(ctx, env, nil, "rclone", "sync", source, "__geldzaken_source:"+s.cfg.S3Bucket)
+		return commandRun(ctx, env, nil, "rclone", "sync", source, sourceRemoteName+":"+s.cfg.S3Bucket)
 	}
 	if s.cfg.ObjectBackend == "filesystem" {
 		return replaceTree(source, s.cfg.ObjectFilesystemRoot)
@@ -784,7 +789,7 @@ func (s *Service) backupDatabase(ctx context.Context, env []string, stage string
 			return err
 		}
 		defer db.Close()
-		path := filepath.Join(destination, "geldzaken.db")
+		path := filepath.Join(destination, "hohoho.db")
 		escaped := strings.ReplaceAll(path, "'", "''")
 		_, err = db.ExecContext(ctx, "vacuum into '"+escaped+"'")
 		return err
@@ -798,7 +803,7 @@ func (s *Service) backupDatabase(ctx context.Context, env []string, stage string
 		if port == "" {
 			port = "5432"
 		}
-		args := []string{"--format=custom", "--no-owner", "--no-privileges", "--file=" + filepath.Join(destination, "geldzaken.pgdump"), "--host=" + parsed.Hostname(), "--port=" + port, "--username=" + parsed.User.Username(), "--dbname=" + strings.TrimPrefix(parsed.Path, "/")}
+		args := []string{"--format=custom", "--no-owner", "--no-privileges", "--file=" + filepath.Join(destination, "hohoho.pgdump"), "--host=" + parsed.Hostname(), "--port=" + port, "--username=" + parsed.User.Username(), "--dbname=" + strings.TrimPrefix(parsed.Path, "/")}
 		return commandRun(ctx, append(env, "PGPASSWORD="+password, "PGSSLMODE="+parsed.Query().Get("sslmode")), nil, "pg_dump", args...)
 	case "mysql":
 		parsed, err := mysqlDriver.ParseDSN(s.cfg.MySQLDSN)
@@ -820,7 +825,7 @@ func (s *Service) backupDatabase(ctx context.Context, env []string, stage string
 			return err
 		}
 		defer os.Remove(defaults)
-		file, err := os.OpenFile(filepath.Join(destination, "geldzaken.sql"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		file, err := os.OpenFile(filepath.Join(destination, "hohoho.sql"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 		if err != nil {
 			return err
 		}
@@ -842,7 +847,7 @@ func (s *Service) backupObjects(ctx context.Context, env []string, stage string)
 		return err
 	}
 	if s.cfg.ObjectBackend == "s3" {
-		return commandRun(ctx, env, nil, "rclone", "copy", "__geldzaken_source:"+s.cfg.S3Bucket, destination)
+		return commandRun(ctx, env, nil, "rclone", "copy", sourceRemoteName+":"+s.cfg.S3Bucket, destination)
 	}
 	if s.cfg.ObjectBackend == "filesystem" {
 		return copyTree(s.cfg.ObjectFilesystemRoot, destination)
@@ -871,7 +876,7 @@ func sourceRemote(cfg config.Config) string {
 	if cfg.S3UseTLS {
 		scheme = "https"
 	}
-	return fmt.Sprintf("\n[__geldzaken_source]\ntype = s3\nprovider = Other\naccess_key_id = %s\nsecret_access_key = %s\nendpoint = %s://%s\nregion = %s\nforce_path_style = %t\n", cfg.S3AccessKey, cfg.S3SecretKey, scheme, cfg.S3Endpoint, cfg.S3Region, cfg.S3PathStyle)
+	return fmt.Sprintf("\n[%s]\ntype = s3\nprovider = Other\naccess_key_id = %s\nsecret_access_key = %s\nendpoint = %s://%s\nregion = %s\nforce_path_style = %t\n", sourceRemoteName, cfg.S3AccessKey, cfg.S3SecretKey, scheme, cfg.S3Endpoint, cfg.S3Region, cfg.S3PathStyle)
 }
 
 func copyTree(source, destination string) error {

@@ -12,22 +12,22 @@ import (
 	"strings"
 	"testing"
 
-	"geldzaken/internal/config"
+	"hohoho/internal/config"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestSettingsValidation(t *testing.T) {
-	valid := settings{Repository: "archive:geldzaken", RcloneConfig: "[archive]\ntype = local\n", ResticPassword: "secret"}
+	valid := settings{Repository: "archive:hohoho", RcloneConfig: "[archive]\ntype = local\n", ResticPassword: "secret"}
 	if err := valid.valid(); err != nil {
 		t.Fatalf("valid settings rejected: %v", err)
 	}
 	for name, mutate := range map[string]func(*settings){
-		"missing remote": func(value *settings) { value.Repository = "geldzaken" },
-		"unknown remote": func(value *settings) { value.Repository = "other:geldzaken" },
+		"missing remote": func(value *settings) { value.Repository = "hohoho" },
+		"unknown remote": func(value *settings) { value.Repository = "other:hohoho" },
 		"empty path":     func(value *settings) { value.Repository = "archive:" },
 		"reserved remote": func(value *settings) {
-			value.RcloneConfig += "[__geldzaken_source]\ntype = local\n"
+			value.RcloneConfig += "[__hohoho_source]\ntype = local\n"
 		},
 		"missing password": func(value *settings) { value.ResticPassword = "" },
 	} {
@@ -43,7 +43,7 @@ func TestSettingsValidation(t *testing.T) {
 
 func TestWriteSettingsUsesPrivatePermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config", "backup.json")
-	value := settings{Version: 1, Repository: "archive:geldzaken", RcloneConfig: "[archive]\ntype = local\n", ResticPassword: "secret"}
+	value := settings{Version: 1, Repository: "archive:hohoho", RcloneConfig: "[archive]\ntype = local\n", ResticPassword: "secret"}
 	if err := writeSettings(path, value); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestSQLiteRecoveryRoundTrip(t *testing.T) {
 	workRoot := filepath.Join(root, "work")
 	objectRoot := filepath.Join(root, "objects")
 	repositoryRoot := filepath.Join(root, "repository")
-	databasePath := filepath.Join(root, "database", "geldzaken.db")
+	databasePath := filepath.Join(root, "database", "hohoho.db")
 	configPath := filepath.Join(configDirectory, "storage.json")
 	for _, directory := range []string{configDirectory, workRoot, objectRoot, repositoryRoot, filepath.Dir(databasePath)} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {

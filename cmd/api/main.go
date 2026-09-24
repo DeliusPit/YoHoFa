@@ -10,11 +10,12 @@ import (
 	"syscall"
 	"time"
 
-	"geldzaken/internal/config"
-	"geldzaken/internal/httpserver"
-	"geldzaken/internal/objectstore"
-	"geldzaken/internal/store"
-	"geldzaken/internal/systembackup"
+	"hohoho/internal/config"
+	"hohoho/internal/documenttranslation"
+	"hohoho/internal/httpserver"
+	"hohoho/internal/objectstore"
+	"hohoho/internal/store"
+	"hohoho/internal/systembackup"
 )
 
 func main() {
@@ -52,6 +53,7 @@ func main() {
 	documents, _ := db.(store.DocumentRepository)
 	assets, _ := db.(store.AssetRepository)
 	liabilities, _ := db.(store.LiabilityRepository)
+	reservations, _ := db.(store.ReservationRepository)
 	cases, _ := db.(store.CaseRepository)
 	relations, _ := db.(store.EntityRelationRepository)
 	events, _ := db.(store.DomainEventRepository)
@@ -65,10 +67,11 @@ func main() {
 	} else {
 		backup.SetShutdown(stop)
 	}
+	translation := documenttranslation.New(documents, objects, cfg.LLMEndpoint, logger)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpserver.New(httpserver.Dependencies{Config: cfg, Store: db, Documents: documents, Assets: assets, Liabilities: liabilities, Cases: cases, Relations: relations, Events: events, Objects: objects, ObjectStoreRequired: documents != nil, Configuration: configuration, SystemBackup: backup, Logger: logger}),
+		Handler:           httpserver.New(httpserver.Dependencies{Config: cfg, Store: db, Documents: documents, Assets: assets, Liabilities: liabilities, Reservations: reservations, Cases: cases, Relations: relations, Events: events, Objects: objects, ObjectStoreRequired: documents != nil, Configuration: configuration, SystemBackup: backup, DocumentTranslation: translation, Logger: logger}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

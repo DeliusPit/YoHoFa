@@ -36,6 +36,9 @@ type Config struct {
 	S3PathStyle            bool
 	S3CreateBucket         bool
 	ObjectFilesystemRoot   string
+	LLMEndpoint            string
+	LLMDocumentMetadata    bool
+	LLMTransactionClassify bool
 	ConfigPath             string
 	ConfigEditable         bool
 	ConfigBootstrapFromEnv bool
@@ -43,7 +46,7 @@ type Config struct {
 }
 
 func FromEnv() Config {
-	databaseURL := env("DATABASE_URL", "postgres://geldzaken:geldzaken@localhost:5432/geldzaken?sslmode=disable")
+	databaseURL := env("DATABASE_URL", "postgres://hohoho:hohoho@localhost:5432/hohoho?sslmode=disable")
 	cfg := Config{
 		AppEnv:                 env("APP_ENV", "development"),
 		HTTPAddr:               env("HTTP_ADDR", ":8080"),
@@ -54,7 +57,7 @@ func FromEnv() Config {
 		StorageProfile:         env("STORAGE_PROFILE", "server"),
 		StoreBackend:           envFallback("DATABASE_BACKEND", "STORE_BACKEND", "postgres"),
 		DatabaseURL:            databaseURL,
-		DatabasePath:           env("DATABASE_PATH", "data/geldzaken.db"),
+		DatabasePath:           env("DATABASE_PATH", "data/hohoho.db"),
 		PostgresURL:            databaseURL,
 		MySQLHost:              env("MYSQL_HOST", ""),
 		MySQLPort:              intEnv("MYSQL_PORT", 3306),
@@ -64,15 +67,18 @@ func FromEnv() Config {
 		MySQLTLSMode:           env("MYSQL_TLS_MODE", "required"),
 		DatabaseDataRoot:       env("DATABASE_DATA_ROOT", ""),
 		ObjectBackend:          env("OBJECT_BACKEND", "s3"),
-		S3Endpoint:             envFallback("S3_ENDPOINT", "MINIO_ENDPOINT", "localhost:9000"),
-		S3AccessKey:            envFallback("S3_ACCESS_KEY", "MINIO_ACCESS_KEY", ""),
-		S3SecretKey:            envFallback("S3_SECRET_KEY", "MINIO_SECRET_KEY", ""),
-		S3Bucket:               envFallback("S3_BUCKET", "MINIO_BUCKET", "geldzaken-documents"),
-		S3UseTLS:               boolEnvFallback("S3_USE_TLS", "MINIO_USE_SSL", false),
+		S3Endpoint:             env("S3_ENDPOINT", "localhost:9000"),
+		S3AccessKey:            env("S3_ACCESS_KEY", ""),
+		S3SecretKey:            env("S3_SECRET_KEY", ""),
+		S3Bucket:               env("S3_BUCKET", "hohoho-documents"),
+		S3UseTLS:               boolEnv("S3_USE_TLS", false),
 		S3Region:               env("S3_REGION", "us-east-1"),
 		S3PathStyle:            boolEnv("S3_PATH_STYLE", true),
 		S3CreateBucket:         boolEnv("S3_CREATE_BUCKET", true),
 		ObjectFilesystemRoot:   env("OBJECT_FILESYSTEM_ROOT", "/app/data/objects"),
+		LLMEndpoint:            env("LLM_ENDPOINT", ""),
+		LLMDocumentMetadata:    boolEnv("LLM_DOCUMENT_METADATA", false),
+		LLMTransactionClassify: boolEnv("LLM_TRANSACTION_CLASSIFY", false),
 		ConfigPath:             env("CONFIG_PATH", "config/storage.json"),
 		ConfigEditable:         boolEnv("CONFIG_EDITABLE", false),
 		ConfigBootstrapFromEnv: boolEnv("CONFIG_BOOTSTRAP_FROM_ENV", false),
@@ -116,13 +122,6 @@ func boolEnv(key string, fallback bool) bool {
 		return fallback
 	}
 	return value == "true"
-}
-
-func boolEnvFallback(key, legacyKey string, fallback bool) bool {
-	if os.Getenv(key) != "" {
-		return boolEnv(key, fallback)
-	}
-	return boolEnv(legacyKey, fallback)
 }
 
 func intEnv(key string, fallback int) int {

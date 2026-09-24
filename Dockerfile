@@ -13,8 +13,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/geldzaken-api ./cmd/api
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/geldzaken-recover ./cmd/recover
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/hohoho-api ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/hohoho-recover ./cmd/recover
 
 FROM rclone/rclone:1.75.0 AS rclone
 
@@ -25,11 +25,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
-COPY --from=api-build /out/geldzaken-api /app/geldzaken-api
-COPY --from=api-build /out/geldzaken-recover /app/geldzaken-recover
+COPY --from=api-build /out/hohoho-api /app/hohoho-api
+COPY --from=api-build /out/hohoho-recover /app/hohoho-recover
 COPY --from=web-build /src/web/dist /app/web/dist
 
 RUN pg_dump --version && mariadb-dump --version && rclone version && restic version
 
 EXPOSE 8080
-ENTRYPOINT ["/app/geldzaken-api"]
+ENTRYPOINT ["/app/hohoho-api"]

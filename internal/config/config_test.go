@@ -2,33 +2,27 @@ package config
 
 import "testing"
 
-func TestFromEnvLegacyMinIODefaults(t *testing.T) {
+func TestFromEnvS3Defaults(t *testing.T) {
 	clearStorageEnv(t)
-	t.Setenv("MINIO_ENDPOINT", "garage:3900")
-	t.Setenv("MINIO_ACCESS_KEY", "legacy-access")
-	t.Setenv("MINIO_SECRET_KEY", "legacy-secret")
-	t.Setenv("MINIO_BUCKET", "documents")
-	t.Setenv("MINIO_USE_SSL", "true")
 
 	cfg := FromEnv()
-	if cfg.S3Endpoint != "garage:3900" || cfg.S3AccessKey != "legacy-access" || cfg.S3SecretKey != "legacy-secret" || cfg.S3Bucket != "documents" || !cfg.S3UseTLS {
-		t.Fatal("legacy MINIO_* values were not mapped to S3 configuration")
+	if cfg.S3Endpoint != "localhost:9000" || cfg.S3AccessKey != "" || cfg.S3SecretKey != "" || cfg.S3Bucket != "hohoho-documents" || cfg.S3UseTLS {
+		t.Fatal("unexpected S3 defaults")
 	}
 	if !cfg.S3CreateBucket || !cfg.S3PathStyle || cfg.S3Region != "us-east-1" {
-		t.Fatalf("unexpected legacy S3 defaults: create=%v pathStyle=%v region=%q", cfg.S3CreateBucket, cfg.S3PathStyle, cfg.S3Region)
+		t.Fatalf("unexpected S3 defaults: create=%v pathStyle=%v region=%q", cfg.S3CreateBucket, cfg.S3PathStyle, cfg.S3Region)
 	}
 }
 
-func TestFromEnvPrefersProviderNeutralS3Values(t *testing.T) {
+func TestFromEnvUsesS3Values(t *testing.T) {
 	clearStorageEnv(t)
-	t.Setenv("MINIO_ENDPOINT", "legacy:9000")
 	t.Setenv("S3_ENDPOINT", "s3.example.test")
 	t.Setenv("S3_CREATE_BUCKET", "false")
 	t.Setenv("S3_PATH_STYLE", "false")
 
 	cfg := FromEnv()
 	if cfg.S3Endpoint != "s3.example.test" || cfg.S3CreateBucket || cfg.S3PathStyle {
-		t.Fatalf("provider-neutral values did not take precedence: %+v", cfg)
+		t.Fatalf("S3 values were not used: %+v", cfg)
 	}
 }
 
@@ -49,7 +43,7 @@ func TestFromEnvBuildsMySQLConfiguration(t *testing.T) {
 
 func clearStorageEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"STORAGE_PROFILE", "DATABASE_BACKEND", "STORE_BACKEND", "DATABASE_URL", "DATABASE_PATH", "MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_TLS_MODE", "OBJECT_BACKEND", "OBJECT_FILESYSTEM_ROOT", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET", "S3_USE_TLS", "S3_REGION", "S3_PATH_STYLE", "S3_CREATE_BUCKET", "MINIO_ENDPOINT", "MINIO_ACCESS_KEY", "MINIO_SECRET_KEY", "MINIO_BUCKET", "MINIO_USE_SSL"} {
+	for _, key := range []string{"STORAGE_PROFILE", "DATABASE_BACKEND", "STORE_BACKEND", "DATABASE_URL", "DATABASE_PATH", "MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_TLS_MODE", "OBJECT_BACKEND", "OBJECT_FILESYSTEM_ROOT", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET", "S3_USE_TLS", "S3_REGION", "S3_PATH_STYLE", "S3_CREATE_BUCKET", "LLM_ENDPOINT", "LLM_DOCUMENT_METADATA", "LLM_TRANSACTION_CLASSIFY"} {
 		t.Setenv(key, "")
 	}
 }

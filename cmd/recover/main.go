@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"os"
 
-	"geldzaken/internal/config"
-	"geldzaken/internal/systembackup"
+	"hohoho/internal/config"
+	"hohoho/internal/systembackup"
 )
 
 func main() {
