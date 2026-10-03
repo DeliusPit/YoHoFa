@@ -2,6 +2,10 @@
 
 House Hold Hosting: applicatie-opbouw voor de administratie van een huishouden.
 
+## Doelarchitectuur v3 (in voorbereiding)
+
+Het [v3-kernmodel](docs/data-model-v3.md) bestaat uit negen tabellen rond financiële objecten. De [technische doelarchitectuur](docs/technical-architecture-v3.md) wordt een volledig browserbediende applicatie met één Go-service, uitsluitend SQLite voor data en Garage/S3 voor documenten, gedeployed via Docker Compose. De instructies hieronder beschrijven nog de bestaande runtime.
+
 ## Doel
 
 Een zo veel mogelijk in Go geschreven applicatie met een kleine JavaScript frontend en configureerbare opslag.
@@ -114,7 +118,7 @@ docker compose -f compose.yml up -d
 
 Zonder bestand blijft de bestaande environment-configuratie alleen-lezen werken wanneer opslagvariabelen aanwezig zijn. In productie zijn zowel `AUTH_USERNAME` als `AUTH_PASSWORD` verplicht; bij een ontbrekende waarde start de backend niet. Met volledige authenticatie staat `CONFIG_EDITABLE=true` wijzigingen via `Configuratie > Systeemconfiguratie` toe. Alleen niet-productieontwikkeling op een loopback-adres mag zonder authenticatie wijzigen; andere niet-productieomgevingen worden zonder volledige authenticatie alleen-lezen. Secrets worden uitsluitend als ingesteld/niet ingesteld getoond. Wijzigingen worden atomisch met bestandsmodus `0600` opgeslagen en gelden na een herstart.
 
-Een succesvolle wijziging schrijft opslagconfiguratieversie 3. Daarin blijven de afzonderlijke SQLite-, PostgreSQL- en MySQL-instellingen bewaard wanneer een andere backend wordt gekozen; hetzelfde geldt voor filesystem- en S3-instellingen. De lokale LLM-endpoint en de opties voor documentvertaling en transactieclassificatie worden daarin ook bewaard. Documentvertaling verwerkt tekstbestanden en PDF's met ingebedde tekst; scans en afbeeldingen hebben eerst OCR nodig. Transactieclassificatie is nog niet actief. Bestaande versie-2- en ongenummerde bestanden blijven compatibel en worden pas bij een succesvolle wijziging naar versie 3 geschreven. De veilige GET-API retourneert alleen of wachtwoorden/sleutels zijn ingesteld, nooit de geheimen zelf.
+Een succesvolle wijziging schrijft opslagconfiguratieversie 3. Daarin blijven de afzonderlijke SQLite-, PostgreSQL- en MySQL-instellingen bewaard wanneer een andere backend wordt gekozen; hetzelfde geldt voor filesystem- en S3-instellingen. De PDF-AI-endpoint, lokale LLM-endpoint en de opties voor documentanalyse en transactieclassificatie worden daarin ook bewaard. PDF-documentanalyse loopt via de centrale PDF-AI-service, inclusief OCR waar nodig. Transactieclassificatie is nog niet actief. Bestaande versie-2- en ongenummerde bestanden blijven compatibel en worden pas bij een succesvolle wijziging naar versie 3 geschreven. De veilige GET-API retourneert alleen of wachtwoorden/sleutels zijn ingesteld, nooit de geheimen zelf.
 
 De profielen `local`, `server` en `central` zijn ondersteund. `local` combineert SQLite met filesystem-opslag; `server` en `central` combineren PostgreSQL of MySQL met filesystem- of S3-opslag. Alle drie databases implementeren documentenmetadata, assets, liabilities, dossiers, relaties, waarderingen en tijdlijnen. MySQL TLS is beperkt tot `required` (standaard, zonder plaintext fallback) en expliciet `disabled` voor een vertrouwd lokaal netwerk zoals Compose. Eerdere `preferred`-instellingen worden veilig als `required` behandeld. CA-instellingen zijn nog niet geïmplementeerd. Een andere selectie wijzigt alleen de actieve backend en migreert geen bestaande databasegegevens of objecten.
 

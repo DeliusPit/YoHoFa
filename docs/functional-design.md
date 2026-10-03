@@ -1,5 +1,7 @@
 # Functioneel Ontwerp
 
+> **Huidige functies en bestaand ontwerp.** V3 vereenvoudigt de domeinen naar [negen kerntabellen](data-model-v3.md) en gebruikt de [SQLite/Garage-browserarchitectuur](technical-architecture-v3.md). Eén deployment/database is één huishouden; v3 introduceert geen multi-household-model.
+
 Dit document beschrijft de functionele opzet van HoHoHo. Het doel is een geïntegreerde huishoudadministratie waarin banktransacties, documenten, bezittingen, schulden, reserveringen en dossiers met elkaar verbonden kunnen worden.
 
 ## Productvisie
@@ -150,14 +152,14 @@ Gebruikersfuncties:
 - Documentmetadata vastleggen: bestandsnaam, MIME-type, grootte, checksum, datum en omschrijving.
 - Documentinhoud openen/downloaden.
 - Documenten koppelen aan transacties, bezittingen, schulden, dossiers en reserveringen.
-- Automatische documentanalyse bekijken wanneer lokale LLM is geconfigureerd.
+- Automatische PDF-documentanalyse bekijken wanneer de centrale PDF-AI-service is geconfigureerd.
 
 Belangrijke keuzes:
 
 - De relationele database is bron van waarheid voor metadata en relaties.
 - Het originele document blijft in objectopslag en wordt niet vervangen door AI-output.
 - Documentanalyse wordt apart opgeslagen in `document_analyses` en compatibel getoond via bestaande documentvelden.
-- Scans en afbeeldingen vereisen later OCR; nu werken tekstbestanden en PDF's met ingebedde tekst.
+- PDF-analyse loopt via de centrale PDF-AI-service; die verzorgt tekstextractie en OCR voor gewone en gescande PDF's.
 
 ## Parties en Tegenpartijen
 
@@ -302,7 +304,8 @@ Gebruikersfuncties:
 - Opslagprofiel kiezen: `local`, `server`, `central`.
 - Databasebackend configureren: SQLite, PostgreSQL of MySQL.
 - Objectopslag configureren: filesystem of S3-compatible.
-- Lokale LLM-endpoint configureren.
+- PDF-AI-endpoint configureren voor documentanalyse.
+- Lokale LLM-endpoint configureren voor toekomstige transactieclassificatie.
 - Opties voor documentanalyse en toekomstige transactieclassificatie beheren.
 
 Belangrijke keuzes:
@@ -334,7 +337,7 @@ Belangrijke keuzes:
 
 Huidig actief:
 
-- Documentanalyse voor tekstbestanden en PDF's met ingebedde tekst via lokale OpenAI-compatible LLM.
+- PDF-documentanalyse via de centrale PDF-AI-service.
 
 Ontworpen maar nog niet actief:
 

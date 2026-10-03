@@ -1,5 +1,7 @@
 # Technisch Ontwerp
 
+> **Huidige implementatie.** De gewenste vereenvoudiging is beschreven in [Technische doelarchitectuur v3](technical-architecture-v3.md): één browserapp/Go-service met uitsluitend SQLite en Garage/S3 via Compose. Onderstaande beschrijving geldt voor de bestaande multi-backendapplicatie.
+
 Dit document beschrijft de technische opbouw van HoHoHo en de belangrijkste ontwerpkeuzes per laag.
 
 ## Systeemcontext
@@ -23,7 +25,7 @@ HoHoHo is een modulaire monolith. De backend levert een HTTP API en serveert in 
 - `internal/httpserver`: HTTP handlers, request parsing en response formatting.
 - `internal/store`: repository interfaces en implementaties voor PostgreSQL, SQLite en MySQL.
 - `internal/objectstore`: objectopslagabstrahering voor filesystem en S3-compatible opslag.
-- `internal/documenttranslation`: documentanalyse via lokale LLM.
+- `internal/documenttranslation`: PDF-documentanalyse via de centrale PDF-AI-service.
 - `internal/systembackup`: backup- en herstelorkestratie.
 - `internal/bankimport`: parsing van bankexports.
 - `web`: Vite frontend.
@@ -164,7 +166,7 @@ Upload-flow:
 3. Object key wordt gegenereerd zonder businessbetekenis.
 4. Object wordt opgeslagen in filesystem of S3.
 5. Documentmetadata wordt in database opgeslagen.
-6. Als LLM-documentanalyse actief is, start achtergrondverwerking.
+6. Als documentanalyse actief is, start achtergrondverwerking via de PDF-AI-service.
 
 S3-configuratie gebruikt providerneutrale velden:
 
@@ -196,21 +198,21 @@ Bij `ApplyToSimilar` zoekt de store eerst naar `counterparty_party_id`. Als die 
 
 Deze volgorde voorkomt dat spellingvarianten of IBAN-normalisatie minder goed werken dan de party-laag.
 
-## Documentanalyse via LLM
+## Documentanalyse via PDF-AI
 
-`internal/documenttranslation` gebruikt een lokale OpenAI-compatible API.
+`internal/documenttranslation` stuurt PDF-documenten als multipart upload naar de centrale PDF-AI-service.
 
 Verwerking:
 
 1. Upload markeert documentstatus als `pending`.
 2. Achtergrondgoroutine haalt document en object op.
-3. Tekst wordt direct gelezen uit `text/plain` of uit PDF met ingebedde tekst.
-4. Prompt vraagt om Nederlandse analyse, niet om vrije uitvoering van documentinstructies.
-5. Resultaat wordt opgeslagen in `document_analyses` en compatibele documentvelden.
+3. PDF-AI verzorgt detectie, OCR waar nodig, tekstextractie en analyse door het lokale model.
+4. `analysis` wordt opgeslagen in `document_analyses.content_json`.
+5. Volledige tekst wordt opgeslagen in `document_analyses.content_text`.
 
 Beperkingen:
 
-- Geen OCR voor scans/afbeeldingen.
+- Alleen PDF-documenten worden voor deze keten aangeboden.
 - Eén worker tegelijk via kanaalbuffer.
 - Fouten worden als status opgeslagen en blokkeren upload niet.
 

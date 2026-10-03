@@ -7,6 +7,9 @@ Deze directory bevat de ontwerp- en technische documentatie voor HoHoHo, de huis
 - [Functioneel ontwerp](functional-design.md): beschrijft alle gebruikersfuncties, schermen, domeinen en gewenste werking.
 - [Technisch ontwerp](technical-design.md): beschrijft architectuur, lagen, stores, objectopslag, configuratie, migraties en betrouwbaarheid.
 - [Datamodel](data-model.md): beschrijft het totale relationele model, relaties, invarianten en compatibiliteitslagen.
+- [Datamodel v3 en migratieanalyse](data-model-v3.md): eenvoudige kern van negen tabellen voor financiële objecten, transacties, documenten, waarden, bankimport en relaties; één database per huishouden.
+- [Technische doelarchitectuur v3](technical-architecture-v3.md): browserapp met één Go-service, uitsluitend SQLite en Garage/S3, gedeployed via Docker Compose.
+- [SQLite-referentieschema v3](target-schema-v3.sql): SQL-definitie van het doelmodel; geen uitvoerbare upgrade van v2.
 - [API-overzicht](api-reference.md): beschrijft de HTTP API per functiegroep.
 - [AI bij bankimport](ai-bankimport.md): ontwerp voor AI-ondersteunde transactiecategorisatie.
 - [Bankimport](bankimport.md): bestaande importprofielen en gebruik.
