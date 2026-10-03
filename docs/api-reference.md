@@ -456,7 +456,7 @@ Gedrag:
 
 - Schrijft objectbytes naar filesystem/S3.
 - Schrijft metadata naar relationele store.
-- Start documentanalyse als `LLMDocumentMetadata` aan staat en de service beschikbaar is.
+- Start PDF-documentanalyse via PDF-AI als documentanalyse aan staat en de service beschikbaar is.
 
 Fouten:
 

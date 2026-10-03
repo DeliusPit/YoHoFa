@@ -9,6 +9,9 @@ func TestFromEnvS3Defaults(t *testing.T) {
 	if cfg.S3Endpoint != "localhost:9000" || cfg.S3AccessKey != "" || cfg.S3SecretKey != "" || cfg.S3Bucket != "hohoho-documents" || cfg.S3UseTLS {
 		t.Fatal("unexpected S3 defaults")
 	}
+	if cfg.PDFAIURL != "http://192.168.178.215:8090" {
+		t.Fatalf("unexpected PDF AI default: %q", cfg.PDFAIURL)
+	}
 	if !cfg.S3CreateBucket || !cfg.S3PathStyle || cfg.S3Region != "us-east-1" {
 		t.Fatalf("unexpected S3 defaults: create=%v pathStyle=%v region=%q", cfg.S3CreateBucket, cfg.S3PathStyle, cfg.S3Region)
 	}
@@ -43,7 +46,7 @@ func TestFromEnvBuildsMySQLConfiguration(t *testing.T) {
 
 func clearStorageEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"STORAGE_PROFILE", "DATABASE_BACKEND", "STORE_BACKEND", "DATABASE_URL", "DATABASE_PATH", "MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_TLS_MODE", "OBJECT_BACKEND", "OBJECT_FILESYSTEM_ROOT", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET", "S3_USE_TLS", "S3_REGION", "S3_PATH_STYLE", "S3_CREATE_BUCKET", "LLM_ENDPOINT", "LLM_DOCUMENT_METADATA", "LLM_TRANSACTION_CLASSIFY"} {
+	for _, key := range []string{"STORAGE_PROFILE", "DATABASE_BACKEND", "STORE_BACKEND", "DATABASE_URL", "DATABASE_PATH", "MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_TLS_MODE", "OBJECT_BACKEND", "OBJECT_FILESYSTEM_ROOT", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET", "S3_USE_TLS", "S3_REGION", "S3_PATH_STYLE", "S3_CREATE_BUCKET", "LLM_ENDPOINT", "PDF_AI_URL", "LLM_DOCUMENT_METADATA", "LLM_TRANSACTION_CLASSIFY"} {
 		t.Setenv(key, "")
 	}
 }

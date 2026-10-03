@@ -88,6 +88,7 @@ services:
       S3_REGION: ${S3_REGION:-garage}
       S3_PATH_STYLE: ${S3_PATH_STYLE:-true}
       S3_CREATE_BUCKET: ${S3_CREATE_BUCKET:-false}
+      PDF_AI_URL: ${PDF_AI_URL:-http://192.168.178.215:8090}
 
     volumes:
       - ./config:/app/config

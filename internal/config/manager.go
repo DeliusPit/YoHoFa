@@ -71,6 +71,7 @@ type ObjectInput struct {
 
 type LLMInput struct {
 	Endpoint            string `json:"endpoint"`
+	PDFAIURL            string `json:"pdfAiUrl"`
 	DocumentMetadata    bool   `json:"documentMetadata"`
 	TransactionClassify bool   `json:"transactionClassify"`
 }
@@ -132,6 +133,7 @@ type ObjectView struct {
 
 type LLMView struct {
 	Endpoint            string `json:"endpoint"`
+	PDFAIURL            string `json:"pdfAiUrl"`
 	DocumentMetadata    bool   `json:"documentMetadata"`
 	TransactionClassify bool   `json:"transactionClassify"`
 }
@@ -206,6 +208,7 @@ type diskConfig struct {
 	} `json:"object"`
 	LLM struct {
 		Endpoint            string `json:"endpoint"`
+		PDFAIURL            string `json:"pdfAiUrl"`
 		DocumentMetadata    bool   `json:"documentMetadata"`
 		TransactionClassify bool   `json:"transactionClassify"`
 	} `json:"llm,omitempty"`
@@ -354,6 +357,9 @@ func (input Update) config(base Config) (Config, error) {
 	next.ObjectBackend = strings.TrimSpace(input.Objects.Backend)
 	if input.LLM != nil {
 		next.LLMEndpoint = strings.TrimSpace(input.LLM.Endpoint)
+		if strings.TrimSpace(input.LLM.PDFAIURL) != "" {
+			next.PDFAIURL = strings.TrimRight(strings.TrimSpace(input.LLM.PDFAIURL), "/")
+		}
 		next.LLMDocumentMetadata = input.LLM.DocumentMetadata
 		next.LLMTransactionClassify = input.LLM.TransactionClassify
 	}
@@ -429,11 +435,28 @@ func validate(cfg Config) error {
 func validateLLM(cfg Config) error {
 	if cfg.LLMEndpoint == "" {
 		if cfg.LLMDocumentMetadata || cfg.LLMTransactionClassify {
+			if cfg.LLMDocumentMetadata && cfg.PDFAIURL != "" && !cfg.LLMTransactionClassify {
+				return validateHTTPURL(cfg.PDFAIURL)
+			}
 			return ErrInvalid
 		}
+		return validateOptionalHTTPURL(cfg.PDFAIURL)
+	}
+	if err := validateOptionalHTTPURL(cfg.PDFAIURL); err != nil {
+		return err
+	}
+	return validateHTTPURL(cfg.LLMEndpoint)
+}
+
+func validateOptionalHTTPURL(value string) error {
+	if value == "" {
 		return nil
 	}
-	endpoint, err := url.Parse(cfg.LLMEndpoint)
+	return validateHTTPURL(value)
+}
+
+func validateHTTPURL(value string) error {
+	endpoint, err := url.Parse(value)
 	if err != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.Hostname() == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
 		return ErrInvalid
 	}
@@ -541,7 +564,7 @@ func safeView(cfg Config) SettingsView {
 		Profile:  cfg.StorageProfile,
 		Database: database,
 		Objects:  ObjectView{Backend: cfg.ObjectBackend, Path: cfg.ObjectFilesystemRoot, Endpoint: cfg.S3Endpoint, AccessKeySet: cfg.S3AccessKey != "", SecretKeySet: cfg.S3SecretKey != "", Bucket: cfg.S3Bucket, UseTLS: cfg.S3UseTLS, Region: cfg.S3Region, PathStyle: cfg.S3PathStyle, CreateBucket: cfg.S3CreateBucket},
-		LLM:      LLMView{Endpoint: cfg.LLMEndpoint, DocumentMetadata: cfg.LLMDocumentMetadata, TransactionClassify: cfg.LLMTransactionClassify},
+		LLM:      LLMView{Endpoint: cfg.LLMEndpoint, PDFAIURL: cfg.PDFAIURL, DocumentMetadata: cfg.LLMDocumentMetadata, TransactionClassify: cfg.LLMTransactionClassify},
 	}
 }
 
@@ -730,6 +753,7 @@ func diskFromConfig(cfg Config) diskConfig {
 	persisted.Object.S3.PathStyle = cfg.S3PathStyle
 	persisted.Object.S3.CreateBucket = cfg.S3CreateBucket
 	persisted.LLM.Endpoint = cfg.LLMEndpoint
+	persisted.LLM.PDFAIURL = cfg.PDFAIURL
 	persisted.LLM.DocumentMetadata = cfg.LLMDocumentMetadata
 	persisted.LLM.TransactionClassify = cfg.LLMTransactionClassify
 	return persisted
@@ -764,6 +788,9 @@ func (persisted diskConfig) apply(base Config) Config {
 	base.S3CreateBucket = persisted.Object.S3.CreateBucket
 	if persisted.Version >= 3 {
 		base.LLMEndpoint = persisted.LLM.Endpoint
+		if persisted.LLM.PDFAIURL != "" {
+			base.PDFAIURL = persisted.LLM.PDFAIURL
+		}
 		base.LLMDocumentMetadata = persisted.LLM.DocumentMetadata
 		base.LLMTransactionClassify = persisted.LLM.TransactionClassify
 	}
@@ -833,7 +860,7 @@ func readConfigFile(path string) ([]byte, bool, error) {
 }
 
 func storageEnvironmentConfigured() bool {
-	keys := []string{"STORAGE_PROFILE", "DATABASE_BACKEND", "STORE_BACKEND", "DATABASE_URL", "DATABASE_PATH", "DATABASE_DATA_ROOT", "MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_TLS_MODE", "OBJECT_BACKEND", "OBJECT_FILESYSTEM_ROOT", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET", "S3_USE_TLS", "S3_REGION", "S3_PATH_STYLE", "S3_CREATE_BUCKET", "LLM_ENDPOINT", "LLM_DOCUMENT_METADATA", "LLM_TRANSACTION_CLASSIFY"}
+	keys := []string{"STORAGE_PROFILE", "DATABASE_BACKEND", "STORE_BACKEND", "DATABASE_URL", "DATABASE_PATH", "DATABASE_DATA_ROOT", "MYSQL_HOST", "MYSQL_PORT", "MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD", "MYSQL_TLS_MODE", "OBJECT_BACKEND", "OBJECT_FILESYSTEM_ROOT", "S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_BUCKET", "S3_USE_TLS", "S3_REGION", "S3_PATH_STYLE", "S3_CREATE_BUCKET", "LLM_ENDPOINT", "PDF_AI_URL", "LLM_DOCUMENT_METADATA", "LLM_TRANSACTION_CLASSIFY"}
 	for _, key := range keys {
 		if os.Getenv(key) != "" {
 			return true

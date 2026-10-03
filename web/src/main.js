@@ -1500,14 +1500,49 @@ function renderTransactionDocuments(documents) {
 
 function renderDocumentTranslation(document) {
   switch (document.translationStatus) {
-  case 'pending': return '<small>Documentanalyse wordt gemaakt...</small>';
-  case 'completed': return document.translationText
-    ? `<details class="document-analysis"><summary>Nederlandse documentanalyse</summary><div class="document-analysis-body">${renderDocumentAnalysis(document.translationText)}</div></details>`
+  case 'pending': return '<small>Documentanalyse wordt gemaakt; OCR en AI kunnen meerdere minuten duren...</small>';
+  case 'completed': return document.analysis || document.translationText || document.text
+    ? `<details class="document-analysis"><summary>Nederlandse documentanalyse</summary><div class="document-analysis-body">${renderDocumentAnalysisResult(document)}</div></details>`
     : '<small>Geen documentanalyse beschikbaar.</small>';
-  case 'unsupported': return '<small>Geen leesbare tekst gevonden; OCR is nog niet beschikbaar.</small>';
-  case 'failed': return '<small>Documentanalyse is mislukt.</small>';
+  case 'unsupported': return '<small>Documentanalyse is alleen beschikbaar voor PDF-bestanden.</small>';
+  case 'failed': return `<small class="error">Documentanalyse is mislukt.${document.text ? ` ${escapeHtml(document.text)}` : ''}</small>`;
   default: return '';
   }
+}
+
+function renderDocumentAnalysisResult(document) {
+  const blocks = [];
+  if (document.analysis) {
+    blocks.push(renderStructuredDocumentAnalysis(document.analysis));
+  } else if (document.translationText) {
+    blocks.push(renderDocumentAnalysis(document.translationText));
+  }
+  if (document.text) {
+    blocks.push(`<details class="document-full-text"><summary>Volledige documenttekst</summary><pre>${escapeHtml(document.text)}</pre></details>`);
+  }
+  return blocks.join('');
+}
+
+function renderStructuredDocumentAnalysis(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return renderDocumentAnalysis(value);
+  if (Array.isArray(value)) {
+    return `<ul>${value.map((item) => `<li>${renderStructuredDocumentAnalysisValue(item)}</li>`).join('')}</ul>`;
+  }
+  if (typeof value === 'object') {
+    return `<dl class="document-analysis-fields">${Object.entries(value).map(([key, item]) => `<div><dt>${escapeHtml(formatAnalysisKey(key))}</dt><dd>${renderStructuredDocumentAnalysisValue(item)}</dd></div>`).join('')}</dl>`;
+  }
+  return `<p>${escapeHtml(String(value))}</p>`;
+}
+
+function renderStructuredDocumentAnalysisValue(value) {
+  if (value == null || value === '') return '<span class="muted">Niet gevonden</span>';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return escapeHtml(String(value));
+  return renderStructuredDocumentAnalysis(value);
+}
+
+function formatAnalysisKey(value) {
+  return String(value).replace(/[_-]+/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function renderDocumentAnalysis(text) {
@@ -2019,7 +2054,7 @@ function renderOverviewTransactions(transactions) {
 }
 
 function documentTranslationStatusLabel(value) {
-  return { pending: 'analyse loopt', completed: 'geanalyseerd', unsupported: 'geen tekst/OCR nodig', failed: 'analyse mislukt' }[value] || value;
+  return { pending: 'analyse loopt', completed: 'geanalyseerd', unsupported: 'geen PDF', failed: 'analyse mislukt' }[value] || value;
 }
 
 function renderAssetValuations(valuations, currency) {
@@ -3698,10 +3733,11 @@ function renderSystemConfiguration(configuration, statusMessage = '') {
       </fieldset>
       <fieldset ${disabled}>
         <legend>Lokale LLM</legend>
-        <p class="system-config-explanation">Deze instellingen worden opgeslagen voor toekomstige documentanalyse en transactieclassificatie. De automatisering is nog niet actief.</p>
+        <p class="system-config-explanation">PDF-documentanalyse loopt via de centrale PDF-AI-service. Transactieclassificatie gebruikt later het lokale LLM-endpoint.</p>
         <div class="system-fields">
           <label>HTTP(S)-endpoint <input name="llmEndpoint" type="url" value="${systemValue(llm.endpoint)}" placeholder="http://192.168.178.215:8080" /></label>
-          <label class="system-checkbox"><input name="llmDocumentMetadata" type="checkbox" ${llm.documentMetadata ? 'checked' : ''} /> Tekstuele documenten naar het Nederlands vertalen</label>
+          <label>PDF-AI endpoint <input name="pdfAiUrl" type="url" value="${systemValue(llm.pdfAiUrl || 'http://192.168.178.215:8090')}" placeholder="http://192.168.178.215:8090" /></label>
+          <label class="system-checkbox"><input name="llmDocumentMetadata" type="checkbox" ${llm.documentMetadata ? 'checked' : ''} /> PDF-documenten analyseren via PDF-AI</label>
           <label class="system-checkbox"><input name="llmTransactionClassify" type="checkbox" ${llm.transactionClassify ? 'checked' : ''} /> Banktransacties bij import classificeren</label>
         </div>
       </fieldset>
@@ -3755,6 +3791,7 @@ async function saveSystemConfiguration(event) {
     } : { backend: objectBackend, path: form.elements.objectsPath.value },
     llm: {
       endpoint: form.elements.llmEndpoint.value,
+      pdfAiUrl: form.elements.pdfAiUrl.value,
       documentMetadata: form.elements.llmDocumentMetadata.checked,
       transactionClassify: form.elements.llmTransactionClassify.checked,
     },

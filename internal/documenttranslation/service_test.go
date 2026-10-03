@@ -2,6 +2,7 @@ package documenttranslation
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,61 +13,77 @@ import (
 	"hohoho/internal/store"
 )
 
-func TestProcessStoresTranslationFromLoadedModel(t *testing.T) {
-	requests := []string{}
-	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests = append(requests, r.URL.Path)
-		switch r.URL.Path {
-		case "/v1/models":
-			_, _ = w.Write([]byte(`{"data":[{"id":"local-model","status":{"value":"loaded"}}]}`))
-		case "/v1/chat/completions":
-			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Hallo wereld"}}]}`))
-		default:
+func TestProcessStoresAnalysisFromPDFAIService(t *testing.T) {
+	var uploaded string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/document/analyse" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			t.Fatalf("missing multipart file: %v", err)
+		}
+		defer file.Close()
+		if header.Filename != "test.pdf" {
+			t.Fatalf("unexpected filename %q", header.Filename)
+		}
+		data, _ := io.ReadAll(file)
+		uploaded = string(data)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"filename":"test.pdf","analysis":{"documentType":"factuur","amount":"12,34"},"text":"Volledige OCR tekst"}`))
 	}))
-	defer llm.Close()
-	repository := &translationRepository{document: store.Document{ID: 1, MIMEType: "text/plain", ObjectKey: strings.Repeat("a", 64)}}
-	service := New(repository, translationObjects{"Hello world"}, llm.URL, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer server.Close()
+	repository := &translationRepository{document: store.Document{ID: 1, OriginalFilename: "test.pdf", MIMEType: "application/pdf", ObjectKey: strings.Repeat("a", 64)}}
+	service := New(repository, translationObjects{"%PDF-1.7"}, server.URL, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	service.Process(1)
 
-	if repository.status != "completed" || repository.text != "Hallo wereld" {
-		t.Fatalf("unexpected stored translation: status=%q text=%q", repository.status, repository.text)
+	if uploaded != "%PDF-1.7" {
+		t.Fatalf("unexpected uploaded data %q", uploaded)
 	}
-	if strings.Join(requests, ",") != "/v1/models,/v1/chat/completions" {
-		t.Fatalf("unexpected LLM requests: %v", requests)
+	if repository.status != "completed" || repository.text != "Volledige OCR tekst" {
+		t.Fatalf("unexpected stored analysis: status=%q text=%q", repository.status, repository.text)
+	}
+	var analysis map[string]string
+	if err := json.Unmarshal([]byte(repository.analysisJSON), &analysis); err != nil {
+		t.Fatalf("invalid analysis JSON: %v", err)
+	}
+	if analysis["documentType"] != "factuur" || analysis["amount"] != "12,34" {
+		t.Fatalf("unexpected analysis: %+v", analysis)
 	}
 }
 
-func TestProcessStoresSummaryForDutchText(t *testing.T) {
-	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/models" {
-			_, _ = w.Write([]byte(`{"data":[{"id":"local-model","status":{"value":"loaded"}}]}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"Samenvatting in het Nederlands"}}]}`))
-	}))
-	defer llm.Close()
+func TestProcessMarksNonPDFUnsupportedWithoutCallingPDFAI(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+	defer server.Close()
 	repository := &translationRepository{document: store.Document{ID: 1, MIMEType: "text/plain", ObjectKey: strings.Repeat("a", 64)}}
-	New(repository, translationObjects{"Dit is al Nederlands."}, llm.URL+"/v1", slog.New(slog.NewTextHandler(io.Discard, nil))).Process(1)
-	if repository.status != "completed" || repository.text != "Samenvatting in het Nederlands" {
-		t.Fatalf("Dutch text must be summarized: %+v", repository)
+	New(repository, translationObjects{"not read"}, server.URL, slog.New(slog.NewTextHandler(io.Discard, nil))).Process(1)
+	if called {
+		t.Fatal("PDF-AI service was called for a non-PDF document")
 	}
-}
-
-func TestProcessMarksImagesUnsupportedWithoutCallingLLM(t *testing.T) {
-	repository := &translationRepository{document: store.Document{ID: 1, MIMEType: "image/png", ObjectKey: strings.Repeat("a", 64)}}
-	New(repository, translationObjects{"not read"}, "http://127.0.0.1:1", slog.New(slog.NewTextHandler(io.Discard, nil))).Process(1)
-	if repository.status != "unsupported" || repository.text != "" {
+	if repository.status != "unsupported" || repository.text != "" || repository.analysisJSON != "" {
 		t.Fatalf("unexpected unsupported result: %+v", repository)
 	}
 }
 
+func TestProcessStoresPDFAIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "ocr failed", http.StatusBadGateway)
+	}))
+	defer server.Close()
+	repository := &translationRepository{document: store.Document{ID: 1, OriginalFilename: "test.pdf", MIMEType: "application/pdf", ObjectKey: strings.Repeat("a", 64)}}
+	New(repository, translationObjects{"%PDF-1.7"}, server.URL, slog.New(slog.NewTextHandler(io.Discard, nil))).Process(1)
+	if repository.status != "failed" || !strings.Contains(repository.text, "ocr failed") {
+		t.Fatalf("unexpected failed result: %+v", repository)
+	}
+}
+
 type translationRepository struct {
-	document store.Document
-	status   string
-	text     string
+	document     store.Document
+	status       string
+	analysisJSON string
+	text         string
 }
 
 func (r *translationRepository) CreateDocument(context.Context, store.CreateDocument) (store.Document, error) {
@@ -85,6 +102,10 @@ func (r *translationRepository) UnlinkDocument(context.Context, int64, string, i
 }
 func (r *translationRepository) UpdateDocumentTranslation(_ context.Context, _ int64, status string, text string) error {
 	r.status, r.text = status, text
+	return nil
+}
+func (r *translationRepository) UpdateDocumentAnalysis(_ context.Context, _ int64, status string, analysisJSON string, text string) error {
+	r.status, r.analysisJSON, r.text = status, analysisJSON, text
 	return nil
 }
 

@@ -37,6 +37,7 @@ type Config struct {
 	S3CreateBucket         bool
 	ObjectFilesystemRoot   string
 	LLMEndpoint            string
+	PDFAIURL               string
 	LLMDocumentMetadata    bool
 	LLMTransactionClassify bool
 	ConfigPath             string
@@ -77,6 +78,7 @@ func FromEnv() Config {
 		S3CreateBucket:         boolEnv("S3_CREATE_BUCKET", true),
 		ObjectFilesystemRoot:   env("OBJECT_FILESYSTEM_ROOT", "/app/data/objects"),
 		LLMEndpoint:            env("LLM_ENDPOINT", ""),
+		PDFAIURL:               env("PDF_AI_URL", "http://192.168.178.215:8090"),
 		LLMDocumentMetadata:    boolEnv("LLM_DOCUMENT_METADATA", false),
 		LLMTransactionClassify: boolEnv("LLM_TRANSACTION_CLASSIFY", false),
 		ConfigPath:             env("CONFIG_PATH", "config/storage.json"),

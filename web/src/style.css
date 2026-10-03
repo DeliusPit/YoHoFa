@@ -1555,6 +1555,46 @@ td:nth-child(5) {
   font-size: inherit;
 }
 
+.document-analysis-fields {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+}
+
+.document-analysis-fields div {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.document-analysis-fields dt {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.document-analysis-fields dd {
+  margin: 0;
+}
+
+.document-full-text {
+  margin-top: 1rem;
+}
+
+.document-full-text pre {
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.8rem;
+  border-radius: 0.8rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+}
+
 .document-analysis-table {
   max-width: 100%;
   margin-top: 10px;

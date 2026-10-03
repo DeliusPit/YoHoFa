@@ -67,7 +67,7 @@ func main() {
 	} else {
 		backup.SetShutdown(stop)
 	}
-	translation := documenttranslation.New(documents, objects, cfg.LLMEndpoint, logger)
+	translation := documenttranslation.New(documents, objects, cfg.PDFAIURL, logger)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

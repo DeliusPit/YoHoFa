@@ -13,8 +13,8 @@ const mysqlLiabilityColumns = `liabilities.id,liabilities.household_id,liability
 const mysqlLiabilityJoin = ` left join parties on parties.id=liabilities.creditor_party_id`
 const mysqlCaseColumns = `id,household_id,coalesce(main_category_id,0),case_type,title,coalesce(description,''),coalesce(date_format(start_date,'%Y-%m-%d'),''),coalesce(date_format(end_date,'%Y-%m-%d'),''),coalesce(term_months,0),status,date_format(created_at,'%Y-%m-%d %H:%i:%s.%f+00'),date_format(updated_at,'%Y-%m-%d %H:%i:%s.%f+00')`
 const mysqlValuationColumns = `id,asset_id,date_format(valuation_date,'%Y-%m-%d'),value,valuation_type,coalesce(source,''),coalesce(notes,''),date_format(created_at,'%Y-%m-%d %H:%i:%s.%f+00')`
-const mysqlDocumentColumns = `documents.id,documents.original_filename,documents.mime_type,documents.size_bytes,documents.sha256,documents.object_key,coalesce(date_format(documents.document_date,'%Y-%m-%d'),''),coalesce(documents.description,''),coalesce(document_analyses.content_text,documents.translation_text,''),coalesce(document_analyses.status,documents.translation_status),date_format(documents.created_at,'%Y-%m-%d %H:%i:%s.%f+00')`
-const mysqlDocumentJoin = ` left join document_analyses on document_analyses.document_id=documents.id and document_analyses.analysis_type='translation'`
+const mysqlDocumentColumns = `documents.id,documents.original_filename,documents.mime_type,documents.size_bytes,documents.sha256,documents.object_key,coalesce(date_format(documents.document_date,'%Y-%m-%d'),''),coalesce(documents.description,''),coalesce(document_analysis.content_text,document_translation.content_text,documents.translation_text,''),coalesce(document_analysis.status,document_translation.status,documents.translation_status),coalesce(cast(document_analysis.content_json as char),''),date_format(documents.created_at,'%Y-%m-%d %H:%i:%s.%f+00')`
+const mysqlDocumentJoin = ` left join document_analyses document_analysis on document_analysis.document_id=documents.id and document_analysis.analysis_type='analysis' left join document_analyses document_translation on document_translation.document_id=documents.id and document_translation.analysis_type='translation'`
 
 func (s *MySQL) CreateDocument(ctx context.Context, input CreateDocument) (Document, error) {
 	var date any
@@ -37,7 +37,9 @@ func (s *MySQL) CreateDocument(ctx context.Context, input CreateDocument) (Docum
 }
 func (s *MySQL) Document(ctx context.Context, id int64) (Document, error) {
 	var v Document
-	err := s.db.QueryRowContext(ctx, `select `+mysqlDocumentColumns+` from documents`+mysqlDocumentJoin+` where documents.id=?`, id).Scan(&v.ID, &v.OriginalFilename, &v.MIMEType, &v.SizeBytes, &v.SHA256, &v.ObjectKey, &v.DocumentDate, &v.Description, &v.TranslationText, &v.TranslationStatus, &v.CreatedAt)
+	var analysisJSON string
+	err := s.db.QueryRowContext(ctx, `select `+mysqlDocumentColumns+` from documents`+mysqlDocumentJoin+` where documents.id=?`, id).Scan(&v.ID, &v.OriginalFilename, &v.MIMEType, &v.SizeBytes, &v.SHA256, &v.ObjectKey, &v.DocumentDate, &v.Description, &v.Text, &v.TranslationStatus, &analysisJSON, &v.CreatedAt)
+	v.setAnalysis(analysisJSON)
 	if err == sql.ErrNoRows {
 		return Document{}, fmt.Errorf("document not found")
 	}
@@ -55,19 +57,24 @@ func (s *MySQL) documentsQuery(ctx context.Context, q string, args ...any) ([]Do
 	items := []Document{}
 	for rows.Next() {
 		var v Document
-		if err := rows.Scan(&v.ID, &v.OriginalFilename, &v.MIMEType, &v.SizeBytes, &v.SHA256, &v.ObjectKey, &v.DocumentDate, &v.Description, &v.TranslationText, &v.TranslationStatus, &v.CreatedAt); err != nil {
+		var analysisJSON string
+		if err := rows.Scan(&v.ID, &v.OriginalFilename, &v.MIMEType, &v.SizeBytes, &v.SHA256, &v.ObjectKey, &v.DocumentDate, &v.Description, &v.Text, &v.TranslationStatus, &analysisJSON, &v.CreatedAt); err != nil {
 			return nil, err
 		}
+		v.setAnalysis(analysisJSON)
 		items = append(items, v)
 	}
 	return items, rows.Err()
 }
 func (s *MySQL) UpdateDocumentTranslation(ctx context.Context, id int64, status string, text string) error {
+	return s.UpdateDocumentAnalysis(ctx, id, status, "", text)
+}
+func (s *MySQL) UpdateDocumentAnalysis(ctx context.Context, id int64, status string, analysisJSON string, text string) error {
 	r, err := s.db.ExecContext(ctx, `update documents set translation_status=?,translation_text=? where id=?`, status, text, id)
 	if err := mysqlDelete(r, err, "document not found"); err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `insert into document_analyses(document_id,analysis_type,status,language,content_text) values(?,'translation',?,'nl',?) on duplicate key update status=values(status),language=values(language),content_text=values(content_text),updated_at=current_timestamp(6)`, id, status, text)
+	_, err = s.db.ExecContext(ctx, `insert into document_analyses(document_id,analysis_type,status,language,content_text,content_json) values(?,'analysis',?,'nl',?,nullif(?,'')) on duplicate key update status=values(status),language=values(language),content_text=values(content_text),content_json=values(content_json),updated_at=current_timestamp(6)`, id, status, text, analysisJSON)
 	return err
 }
 func (s *MySQL) LinkDocument(ctx context.Context, documentID int64, objectType string, objectID int64) error {

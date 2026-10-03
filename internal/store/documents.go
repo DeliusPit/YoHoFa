@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -21,6 +22,8 @@ type Document struct {
 	Description       string `json:"description,omitempty"`
 	TranslationText   string `json:"translationText,omitempty"`
 	TranslationStatus string `json:"translationStatus"`
+	Analysis          any    `json:"analysis,omitempty"`
+	Text              string `json:"text,omitempty"`
 	CreatedAt         string `json:"createdAt"`
 }
 
@@ -42,6 +45,7 @@ type DocumentRepository interface {
 	DocumentsForObject(context.Context, string, int64) ([]Document, error)
 	UnlinkDocument(context.Context, int64, string, int64) error
 	UpdateDocumentTranslation(context.Context, int64, string, string) error
+	UpdateDocumentAnalysis(context.Context, int64, string, string, string) error
 }
 
 func (s *Postgres) CreateDocument(ctx context.Context, input CreateDocument) (Document, error) {
@@ -68,17 +72,20 @@ func (s *Postgres) CreateDocument(ctx context.Context, input CreateDocument) (Do
 
 func (s *Postgres) Document(ctx context.Context, id int64) (Document, error) {
 	var item Document
+	var analysisJSON string
 	err := s.pool.QueryRow(ctx, `
 		select documents.id, documents.original_filename, documents.mime_type, documents.size_bytes, documents.sha256, documents.object_key,
 			coalesce(to_char(documents.document_date, 'YYYY-MM-DD'), ''), coalesce(documents.description, ''),
-			coalesce(document_analyses.content_text, documents.translation_text, ''), coalesce(document_analyses.status, documents.translation_status), documents.created_at::text
+			coalesce(document_analysis.content_text, document_translation.content_text, documents.translation_text, ''), coalesce(document_analysis.status, document_translation.status, documents.translation_status), coalesce(document_analysis.content_json::text, ''), documents.created_at::text
 		from documents
-		left join document_analyses on document_analyses.document_id = documents.id and document_analyses.analysis_type = 'translation'
+		left join document_analyses document_analysis on document_analysis.document_id = documents.id and document_analysis.analysis_type = 'analysis'
+		left join document_analyses document_translation on document_translation.document_id = documents.id and document_translation.analysis_type = 'translation'
 		where documents.id = $1
-	`, id).Scan(&item.ID, &item.OriginalFilename, &item.MIMEType, &item.SizeBytes, &item.SHA256, &item.ObjectKey, &item.DocumentDate, &item.Description, &item.TranslationText, &item.TranslationStatus, &item.CreatedAt)
+	`, id).Scan(&item.ID, &item.OriginalFilename, &item.MIMEType, &item.SizeBytes, &item.SHA256, &item.ObjectKey, &item.DocumentDate, &item.Description, &item.Text, &item.TranslationStatus, &analysisJSON, &item.CreatedAt)
 	if err == pgx.ErrNoRows {
 		return Document{}, fmt.Errorf("document not found")
 	}
+	item.setAnalysis(analysisJSON)
 	return item, err
 }
 
@@ -86,9 +93,10 @@ func (s *Postgres) Documents(ctx context.Context) ([]Document, error) {
 	return s.documentsQuery(ctx, `
 		select documents.id, documents.original_filename, documents.mime_type, documents.size_bytes, documents.sha256, documents.object_key,
 			coalesce(to_char(documents.document_date, 'YYYY-MM-DD'), ''), coalesce(documents.description, ''),
-			coalesce(document_analyses.content_text, documents.translation_text, ''), coalesce(document_analyses.status, documents.translation_status), documents.created_at::text
+			coalesce(document_analysis.content_text, document_translation.content_text, documents.translation_text, ''), coalesce(document_analysis.status, document_translation.status, documents.translation_status), coalesce(document_analysis.content_json::text, ''), documents.created_at::text
 		from documents
-		left join document_analyses on document_analyses.document_id = documents.id and document_analyses.analysis_type = 'translation'
+		left join document_analyses document_analysis on document_analysis.document_id = documents.id and document_analysis.analysis_type = 'analysis'
+		left join document_analyses document_translation on document_translation.document_id = documents.id and document_translation.analysis_type = 'translation'
 		order by documents.created_at desc, documents.id desc
 	`)
 }
@@ -112,9 +120,10 @@ func (s *Postgres) DocumentsForObject(ctx context.Context, objectType string, ob
 	return s.documentsQuery(ctx, `
 		select documents.id, documents.original_filename, documents.mime_type, documents.size_bytes, documents.sha256, documents.object_key,
 			coalesce(to_char(documents.document_date, 'YYYY-MM-DD'), ''), coalesce(documents.description, ''),
-			coalesce(document_analyses.content_text, documents.translation_text, ''), coalesce(document_analyses.status, documents.translation_status), documents.created_at::text
+			coalesce(document_analysis.content_text, document_translation.content_text, documents.translation_text, ''), coalesce(document_analysis.status, document_translation.status, documents.translation_status), coalesce(document_analysis.content_json::text, ''), documents.created_at::text
 		from documents
-		left join document_analyses on document_analyses.document_id = documents.id and document_analyses.analysis_type = 'translation'
+		left join document_analyses document_analysis on document_analysis.document_id = documents.id and document_analysis.analysis_type = 'analysis'
+		left join document_analyses document_translation on document_translation.document_id = documents.id and document_translation.analysis_type = 'translation'
 		where exists (
 			select 1 from entity_relations
 			where source_type = 'document' and source_id = documents.id
@@ -125,15 +134,19 @@ func (s *Postgres) DocumentsForObject(ctx context.Context, objectType string, ob
 }
 
 func (s *Postgres) UpdateDocumentTranslation(ctx context.Context, id int64, status string, text string) error {
+	return s.UpdateDocumentAnalysis(ctx, id, status, "", text)
+}
+
+func (s *Postgres) UpdateDocumentAnalysis(ctx context.Context, id int64, status string, analysisJSON string, text string) error {
 	result, err := s.pool.Exec(ctx, `
 		with updated as (
 			update documents set translation_status = $1, translation_text = $2 where id = $3 returning id
 		)
-		insert into document_analyses (document_id, analysis_type, status, language, content_text)
-		select id, 'translation', $1, 'nl', $2 from updated
+		insert into document_analyses (document_id, analysis_type, status, language, content_text, content_json)
+		select id, 'analysis', $1, 'nl', $2, nullif($4, '')::jsonb from updated
 		on conflict (document_id, analysis_type) do update
-		set status = excluded.status, content_text = excluded.content_text, language = excluded.language, updated_at = now()
-	`, status, text, id)
+		set status = excluded.status, content_text = excluded.content_text, content_json = excluded.content_json, language = excluded.language, updated_at = now()
+	`, status, text, id, analysisJSON)
 	if err != nil {
 		return err
 	}
@@ -199,10 +212,23 @@ func (s *Postgres) documentsQuery(ctx context.Context, query string, args ...any
 	items := []Document{}
 	for rows.Next() {
 		var item Document
-		if err := rows.Scan(&item.ID, &item.OriginalFilename, &item.MIMEType, &item.SizeBytes, &item.SHA256, &item.ObjectKey, &item.DocumentDate, &item.Description, &item.TranslationText, &item.TranslationStatus, &item.CreatedAt); err != nil {
+		var analysisJSON string
+		if err := rows.Scan(&item.ID, &item.OriginalFilename, &item.MIMEType, &item.SizeBytes, &item.SHA256, &item.ObjectKey, &item.DocumentDate, &item.Description, &item.Text, &item.TranslationStatus, &analysisJSON, &item.CreatedAt); err != nil {
 			return nil, err
 		}
+		item.setAnalysis(analysisJSON)
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (item *Document) setAnalysis(raw string) {
+	item.TranslationText = item.Text
+	if raw == "" {
+		return
+	}
+	var value any
+	if err := json.Unmarshal([]byte(raw), &value); err == nil {
+		item.Analysis = value
+	}
 }
