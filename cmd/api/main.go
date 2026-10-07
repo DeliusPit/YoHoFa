@@ -12,6 +12,7 @@ import (
 
 	"hohoho/internal/config"
 	"hohoho/internal/httpserver"
+	"hohoho/internal/maintenance"
 	"hohoho/internal/store"
 	"hohoho/internal/systembackup"
 )
@@ -59,7 +60,9 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	coreDeps := httpserver.CoreDependencies{Config: cfg, Store: db, Objects: objectStorage, SystemBackup: backupService, Logger: logger}
+	maintenance := &maintenance.Gate{}
+	backupService.SetQuiesce(maintenance.Lock)
+	coreDeps := httpserver.CoreDependencies{Config: cfg, Store: db, Objects: objectStorage, SystemBackup: backupService, Logger: logger, Maintenance: maintenance}
 	// De PDF-AI-analyse blijft bewust los van de opslag: zonder URL is er
 	// geen analyzer en werkt uploaden gewoon door.
 	if analyzer := pdfAIAnalyzer(cfg, objectStorage); analyzer != nil {

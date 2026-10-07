@@ -309,6 +309,7 @@ function renderBankimportConfiguration() {
 
 function renderBackupConfiguration(cfg, statusBadge) {
   const status = backupStatus || {};
+  const policy = status.policy || { schedule: '02:30', keepDaily: 14, keepWeekly: 8, keepMonthly: 24 };
   const ready = cfg.backupRecovery.available;
   return `<section class="core-panel configuration-panel" aria-labelledby="backup-config-heading">
     <div class="core-heading"><h2 id="backup-config-heading">Backup en recovery</h2>${statusBadge(ready && status.configured, ready ? (status.configured ? 'Geconfigureerd' : 'Beschikbaar') : 'Niet beschikbaar')}</div>
@@ -317,12 +318,18 @@ function renderBackupConfiguration(cfg, statusBadge) {
     <form id="backup-form" class="configuration-form">
       <label>Restic repository <input name="repository" value="${escapeHtml(status.repository)}" placeholder="s3:garage:hohoho-backups of rclone:remote:path" ${ready ? '' : 'disabled'} required /></label>
       <label>Rclone config <textarea name="rcloneConfig" rows="7" placeholder="[garage]\ntype = s3\nprovider = Minio\n..." ${ready ? '' : 'disabled'}></textarea><small>Laat leeg om bestaande rclone config te behouden.</small></label>
-      <label>Restic wachtwoord <input name="resticPassword" type="password" autocomplete="new-password" placeholder="${status.resticPasswordSet ? 'Ongewijzigd laten' : 'Invullen'}" ${ready ? '' : 'disabled'} /></label>
+       <label>Restic wachtwoord <input name="resticPassword" type="password" autocomplete="new-password" placeholder="${status.resticPasswordSet ? 'Ongewijzigd laten' : 'Invullen'}" ${ready ? '' : 'disabled'} /></label>
+       <label>Dagelijks tijdstip <input name="schedule" type="time" value="${escapeHtml(policy.schedule)}" ${ready ? '' : 'disabled'} required /></label>
+       <label>Dagelijkse snapshots <input name="keepDaily" type="number" min="1" max="365" value="${escapeHtml(policy.keepDaily)}" ${ready ? '' : 'disabled'} required /></label>
+       <label>Wekelijkse snapshots <input name="keepWeekly" type="number" min="1" max="520" value="${escapeHtml(policy.keepWeekly)}" ${ready ? '' : 'disabled'} required /></label>
+       <label>Maandelijkse snapshots <input name="keepMonthly" type="number" min="1" max="120" value="${escapeHtml(policy.keepMonthly)}" ${ready ? '' : 'disabled'} required /></label>
       <div class="core-actions"><button type="submit" ${ready ? '' : 'disabled'}>Opslaan en controleren</button><button type="button" class="secondary" data-action="backup-validate" ${ready && status.configured ? '' : 'disabled'}>Opnieuw controleren</button><button type="button" data-action="backup-run" ${ready && status.validated && !status.running ? '' : 'disabled'}>Backup starten</button></div>
     </form>
     <dl class="configuration-list">
       <div><dt>Status</dt><dd>${status.running ? 'Backup draait' : (status.validated ? 'Configuratie gevalideerd' : 'Nog niet gevalideerd')}</dd></div>
-      <div><dt>Laatste snapshot</dt><dd>${escapeHtml(status.lastSnapshotId || 'Geen')}</dd></div>
+       <div><dt>Laatste snapshot</dt><dd>${escapeHtml(status.lastSnapshotId || 'Geen')}</dd></div>
+       <div><dt>Laatste controle</dt><dd>${escapeHtml(status.lastValidatedAt || 'Geen')}</dd></div>
+       <div><dt>Laatste restore-proef</dt><dd>${escapeHtml(status.lastDrillAt || 'Geen')}</dd></div>
       <div><dt>Laatste fout</dt><dd>${escapeHtml(status.lastError || status.recoveryError || 'Geen')}</dd></div>
       <div><dt>Recovery</dt><dd>${escapeHtml(status.recoveryState || 'Geen herstel gepland')}</dd></div>
     </dl>
@@ -1257,7 +1264,7 @@ app.addEventListener('submit', async (event) => {
     } else if (form.id === 'backup-form') {
       const rcloneConfig = data.rcloneConfig.trim();
       const resticPassword = data.resticPassword;
-      const payload = { repository: data.repository.trim() };
+      const payload = { repository: data.repository.trim(), policy: { schedule: data.schedule, keepDaily: Number(data.keepDaily), keepWeekly: Number(data.keepWeekly), keepMonthly: Number(data.keepMonthly) } };
       if (rcloneConfig) payload.rcloneConfig = rcloneConfig;
       if (resticPassword) payload.resticPassword = resticPassword;
       backupStatus = await api('/system/backup', { method: 'PUT', body: JSON.stringify(payload) });

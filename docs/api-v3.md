@@ -1,6 +1,6 @@
-# API v3 — objecten, transacties, waarden en relaties
+# API v3 — objecten, transacties, documenten en import
 
-De actieve API van `cmd/api` gebruikt uitsluitend de SQLite-kern. Objectbeheer, waarden, relaties, samenvatting, handmatige transacties met objecttoewijzingen en CSV-bankimport zijn beschikbaar. Documenten volgen later.
+De actieve API van `cmd/api` gebruikt uitsluitend de SQLite-kern met Garage/S3 voor documentbytes. Objectbeheer, waarden, relaties, samenvatting, handmatige transacties met objecttoewijzingen, CSV-bankimport, documenten en systeembackup zijn beschikbaar.
 
 Alle bedragen zijn integer centen. De browserinterface gebruikt EUR als huidige weergaveconventie. Objecttypes zijn exact `asset`, `debt`, `expense`, `reserve`. Relatietypes zijn vrije niet-lege tekst.
 
@@ -141,3 +141,21 @@ Preview en import gebruiken `multipart/form-data` met `bankConfig` en `file`. De
 - 500: interne databasefout; details blijven uit de response.
 
 Mutatiebodies zijn begrensd op 64 KiB. Objecten, transacties, waarden en relaties worden persistent opgeslagen; lege lijsten zijn `[]`, niet `null`.
+## Systeembackup
+
+`GET /api/v1/system/backup` geeft naast de configuratiestatus het backupbeleid en de tijden van de laatste controle en restore-proef terug.
+
+`PUT /api/v1/system/backup` accepteert optioneel `policy`:
+
+```json
+{
+  "policy": {
+    "schedule": "02:30",
+    "keepDaily": 14,
+    "keepWeekly": 8,
+    "keepMonthly": 24
+  }
+}
+```
+
+Na iedere backup controleert de service de repository en voert zij een niet-destructieve restore-proef uit. Herstel synchroniseert de objectbucket exact voordat SQLite wordt vervangen.

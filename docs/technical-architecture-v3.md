@@ -1,6 +1,6 @@
 # HoHoHo v3 — eenvoudige browserapp met SQLite en Garage
 
-Status: **v3-basis en handmatige transacties geïmplementeerd**. De actieve Go-service gebruikt SQLite en serveert object-/waarde-/relatiebeheer en inkomsten/uitgaven met objecttoewijzingen in de browser. Compose bouwt een klein app-image en gebruikt een bestaande Garage-configuratie. Beheerde Garage/bootstrap, bankimport, documentflows en backup/herstel volgen later. Dit document beschrijft de gerealiseerde basis en verdere technische richting naast het [kernmodel met negen tabellen](data-model-v3.md).
+Status: **v3-runtime, bankimport, documenten en backup/herstel geïmplementeerd**. De actieve Go-service gebruikt SQLite, Garage/S3 en een browserinterface. Compose bouwt een klein app-image en gebruikt een bestaande Garage-configuratie. Beheerde Garage/bootstrap volgt later. Dit document beschrijft de gerealiseerde basis en verdere technische richting naast het [kernmodel met negen tabellen](data-model-v3.md).
 
 **Uitvoeringsbesluit:** bestaande data mag vervallen. V3 start op `v3-simplification` met een nieuwe, lege SQLite-database en lege HoHoHo-documentopslag. Er is geen datamigrator, ID-mapping of migratiearchief nodig. Oude data verwijderen blijft een aparte uitvoeringsstap.
 
@@ -123,6 +123,12 @@ Een complete administratie bestaat uit SQLite **en** de bijbehorende Garage-obje
 - Herstel het SQLite-bestand en de Garage-objecten samen; controleer ontbrekende objectsleutels voordat de applicatie weer schrijft.
 - Test backup en herstel ook na containervervanging en na schemamigraties.
 
+- De actieve implementatie houdt muterende API-verzoeken aan tijdens een snapshot. Zij maakt een SQLite `VACUUM INTO`-snapshot en een bijbehorende S3-kopie, bewaart beide met restic en schrijft een manifest.
+
+- Standaard draait dagelijks om 02:30 een backup; de beheerder kan tijdstip en retentie aanpassen. De standaardretentie is 14 dagelijkse, 8 wekelijkse en 24 maandelijkse snapshots.
+
+- Elke geslaagde backup voert `restic check` uit en herstelt de nieuwe snapshot tijdelijk. De restore-proef controleert het manifest en `PRAGMA integrity_check` op SQLite voordat de snapshot als geslaagd telt.
+
 De bestaande backup-/recovercode kan hiervoor worden versmald naar SQLite en S3. Of restic/rclone hiervoor behouden blijven wordt aan deze concrete flow getoetst; PostgreSQL/MySQL-backupbranches zijn geen onderdeel van v3.
 
 ## 7. Concrete wijzigingen en volgorde
@@ -136,7 +142,7 @@ De bestaande backup-/recovercode kan hiervoor worden versmald naar SQLite en S3.
 | `compose.yml` | PostgreSQL/MySQL-services vervangen door app+Garage, met persistente volumes en readiness/bootstrap |
 | `Dockerfile` | Klein runtime-image zonder PostgreSQL/MariaDB-tooling |
 | `web/src/main.js` | Objectgerichte UI en configuratiescherm voor de vaste stack |
-| `internal/systembackup`, `cmd/recover` | Consistente SQLite/S3-snapshots en herstel |
+| `internal/systembackup` | Consistente SQLite/S3-snapshots, retentie, validatie en herstel |
 | `go.mod`, tests en scripts | Niet meer benodigde drivers/dependencies verwijderen; SQLite-, S3- en end-to-endchecks behouden |
 
 Uitvoeringsvolgorde:

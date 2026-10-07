@@ -44,6 +44,26 @@ type SettingsInput struct {
 	Repository     string  `json:"repository"`
 	RcloneConfig   *string `json:"rcloneConfig,omitempty"`
 	ResticPassword *string `json:"resticPassword,omitempty"`
+	Policy         *Policy `json:"policy,omitempty"`
+}
+
+// Policy keeps a small, predictable retention set for a single household.
+type Policy struct {
+	Schedule    string `json:"schedule"`
+	KeepDaily   int    `json:"keepDaily"`
+	KeepWeekly  int    `json:"keepWeekly"`
+	KeepMonthly int    `json:"keepMonthly"`
+}
+
+func defaultPolicy() Policy {
+	return Policy{Schedule: "02:30", KeepDaily: 14, KeepWeekly: 8, KeepMonthly: 24}
+}
+
+func (p Policy) valid() error {
+	if _, err := time.Parse("15:04", p.Schedule); err != nil || p.KeepDaily < 1 || p.KeepWeekly < 1 || p.KeepMonthly < 1 {
+		return ErrInvalid
+	}
+	return nil
 }
 
 type commandError struct {
@@ -89,6 +109,9 @@ type View struct {
 	RecoverySnapshot   string `json:"recoverySnapshot,omitempty"`
 	RecoveryFinishedAt string `json:"recoveryFinishedAt,omitempty"`
 	RecoveryError      string `json:"recoveryError,omitempty"`
+	Policy             Policy `json:"policy"`
+	LastValidatedAt    string `json:"lastValidatedAt,omitempty"`
+	LastDrillAt        string `json:"lastDrillAt,omitempty"`
 }
 
 type Snapshot struct {
@@ -118,21 +141,24 @@ type settings struct {
 	Repository     string `json:"repository"`
 	RcloneConfig   string `json:"rcloneConfig"`
 	ResticPassword string `json:"resticPassword"`
+	Policy         Policy `json:"policy"`
 }
 
 type Service struct {
-	mu          sync.Mutex
-	cfg         config.Config
-	path        string
-	workRoot    string
-	settings    settings
-	validated   bool
-	configuring bool
-	running     bool
-	status      View
-	ctx         context.Context
-	logger      *slog.Logger
-	shutdown    func()
+	mu           sync.Mutex
+	cfg          config.Config
+	path         string
+	workRoot     string
+	settings     settings
+	validated    bool
+	configuring  bool
+	running      bool
+	status       View
+	ctx          context.Context
+	logger       *slog.Logger
+	shutdown     func()
+	quiesce      func() func()
+	lastSchedule string
 }
 
 func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Service, error) {
@@ -146,6 +172,7 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Service,
 	}
 	data, err := os.ReadFile(service.path)
 	if errors.Is(err, os.ErrNotExist) {
+		service.startScheduler()
 		return service, nil
 	}
 	if err != nil {
@@ -154,11 +181,22 @@ func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Service,
 	if err := json.Unmarshal(data, &service.settings); err != nil {
 		return nil, fmt.Errorf("read backup configuration: %w", err)
 	}
+	if service.settings.Policy.Schedule == "" {
+		service.settings.Policy = defaultPolicy()
+	}
 	if err := service.settings.valid(); err != nil {
 		return nil, err
 	}
+	service.validated = true
 	service.loadRecoveryStatus()
+	service.startScheduler()
 	return service, nil
+}
+
+func (s *Service) SetQuiesce(quiesce func() func()) {
+	s.mu.Lock()
+	s.quiesce = quiesce
+	s.mu.Unlock()
 }
 
 func (s *Service) SetShutdown(shutdown func()) {
@@ -177,6 +215,7 @@ func (s *Service) View() View {
 	view.Configured = view.Repository != "" && view.RcloneConfigSet && view.ResticPasswordSet
 	view.Validated = s.validated
 	view.Running = s.running
+	view.Policy = s.settings.Policy
 	return view
 }
 
@@ -203,6 +242,12 @@ func (s *Service) SaveAndValidate(ctx context.Context, input SettingsInput) (Vie
 	if input.ResticPassword != nil && *input.ResticPassword != "" {
 		next.ResticPassword = *input.ResticPassword
 	}
+	if input.Policy != nil {
+		next.Policy = *input.Policy
+	}
+	if next.Policy.Schedule == "" {
+		next.Policy = defaultPolicy()
+	}
 	if err := next.valid(); err != nil {
 		return s.View(), err
 	}
@@ -221,6 +266,36 @@ func (s *Service) SaveAndValidate(ctx context.Context, input SettingsInput) (Vie
 	s.status.LastError = ""
 	s.mu.Unlock()
 	return s.View(), nil
+}
+
+func (s *Service) startScheduler() {
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case now := <-ticker.C:
+				s.startIfDue(now.UTC())
+			}
+		}
+	}()
+}
+
+func (s *Service) startIfDue(now time.Time) {
+	s.mu.Lock()
+	policy := s.settings.Policy
+	due := policy.Schedule == now.Format("15:04") && s.lastSchedule != now.Format("2006-01-02") && s.validated && !s.running && !s.configuring
+	if due {
+		s.lastSchedule = now.Format("2006-01-02")
+	}
+	s.mu.Unlock()
+	if due {
+		if err := s.Start(); err != nil {
+			s.logger.Error("geplande backup kon niet starten", "error", safeStage(err))
+		}
+	}
 }
 
 func (s *Service) Validate(ctx context.Context) (View, error) {
@@ -419,6 +494,12 @@ func (v settings) valid() error {
 	if !strings.Contains(v.RcloneConfig, "["+remote+"]") {
 		return ErrInvalid
 	}
+	if v.Policy.Schedule == "" {
+		v.Policy = defaultPolicy()
+	}
+	if err := v.Policy.valid(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -560,6 +641,16 @@ func (s *Service) runtimeFiles(current settings, includeSource bool) (runtimeFil
 }
 
 func (s *Service) run(ctx context.Context, current settings) (string, error) {
+	if current.Policy.Schedule == "" {
+		current.Policy = defaultPolicy()
+	}
+	s.mu.Lock()
+	quiesce := s.quiesce
+	s.mu.Unlock()
+	if quiesce != nil {
+		release := quiesce()
+		defer release()
+	}
 	runtime, cleanupRuntime, err := s.runtimeFiles(current, true)
 	if err != nil {
 		return "", fmt.Errorf("runtime: %w", err)
@@ -582,7 +673,7 @@ func (s *Service) run(ctx context.Context, current settings) (string, error) {
 	if err := s.backupConfiguration(stage); err != nil {
 		return "", fmt.Errorf("configuration: %w", err)
 	}
-	manifest := map[string]any{"version": 1, "createdAt": time.Now().UTC().Format(time.RFC3339), "databaseBackend": s.cfg.StoreBackend, "objectBackend": s.cfg.ObjectBackend}
+	manifest := map[string]any{"version": 2, "createdAt": time.Now().UTC().Format(time.RFC3339), "databaseBackend": s.cfg.StoreBackend, "objectBackend": s.cfg.ObjectBackend, "policy": current.Policy}
 	data, _ := json.MarshalIndent(manifest, "", "  ")
 	if err := os.WriteFile(filepath.Join(stage, "manifest.json"), data, 0o600); err != nil {
 		return "", fmt.Errorf("manifest: %w", err)
@@ -591,7 +682,22 @@ func (s *Service) run(ctx context.Context, current settings) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("restic: %w", err)
 	}
-	return snapshotID(output), nil
+	snapshot := snapshotID(output)
+	if snapshot == "" {
+		return "", fmt.Errorf("restic: missing snapshot identifier")
+	}
+	if err := s.validateSnapshot(ctx, runtime.env, snapshot); err != nil {
+		return "", fmt.Errorf("validation: %w", err)
+	}
+	if err := s.applyRetention(ctx, runtime.env, current.Policy); err != nil {
+		return "", fmt.Errorf("retention: %w", err)
+	}
+	s.mu.Lock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	s.status.LastValidatedAt = now
+	s.status.LastDrillAt = now
+	s.mu.Unlock()
+	return snapshot, nil
 }
 
 func RunPendingRecovery(ctx context.Context, cfg config.Config, logger *slog.Logger) (bool, error) {
@@ -657,11 +763,13 @@ func (s *Service) RecoverNow(ctx context.Context, snapshotID string, safetyBacku
 	if manifest.DatabaseBackend != s.cfg.StoreBackend || manifest.ObjectBackend != s.cfg.ObjectBackend {
 		return fmt.Errorf("manifest: storage backend mismatch")
 	}
-	if err := s.restoreDatabase(ctx, runtime.env, payload); err != nil {
-		return fmt.Errorf("database: %w", err)
-	}
 	if err := s.restoreObjects(ctx, runtime.env, payload); err != nil {
 		return fmt.Errorf("objects: %w", err)
+	}
+	// Replace the database last: a failed object restore never makes document
+	// metadata point to a partially restored object set.
+	if err := s.restoreDatabase(ctx, runtime.env, payload); err != nil {
+		return fmt.Errorf("database: %w", err)
 	}
 	if err := s.restoreConfiguration(payload); err != nil {
 		return fmt.Errorf("configuration: %w", err)
@@ -700,7 +808,7 @@ func recoveryPayload(root string) (string, backupManifest, error) {
 		return "", backupManifest{}, err
 	}
 	var manifest backupManifest
-	if json.Unmarshal(data, &manifest) != nil || manifest.Version != 1 || manifest.DatabaseBackend == "" || manifest.ObjectBackend == "" {
+	if json.Unmarshal(data, &manifest) != nil || (manifest.Version != 1 && manifest.Version != 2) || manifest.DatabaseBackend == "" || manifest.ObjectBackend == "" {
 		return "", backupManifest{}, fmt.Errorf("invalid manifest")
 	}
 	return payload, manifest, nil
@@ -762,7 +870,7 @@ func (s *Service) mysqlDefaultsFile(directory string, parsed *mysqlDriver.Config
 func (s *Service) restoreObjects(ctx context.Context, env []string, payload string) error {
 	source := filepath.Join(payload, "objects")
 	if s.cfg.ObjectBackend == "s3" {
-		return commandRun(ctx, env, nil, "rclone", "sync", source, sourceRemoteName+":"+s.cfg.S3Bucket)
+		return commandRun(ctx, env, nil, "rclone", "sync", "--delete-during", source, sourceRemoteName+":"+s.cfg.S3Bucket)
 	}
 	if s.cfg.ObjectBackend == "filesystem" {
 		return replaceTree(source, s.cfg.ObjectFilesystemRoot)
@@ -867,6 +975,47 @@ func (s *Service) backupConfiguration(stage string) error {
 			}
 			return err
 		}
+	}
+	return nil
+}
+
+func (s *Service) applyRetention(ctx context.Context, env []string, policy Policy) error {
+	return commandRun(ctx, env, nil, "restic", "forget", "--tag", backupTag, "--keep-daily", fmt.Sprint(policy.KeepDaily), "--keep-weekly", fmt.Sprint(policy.KeepWeekly), "--keep-monthly", fmt.Sprint(policy.KeepMonthly), "--prune")
+}
+
+// validateSnapshot checks repository data and performs a non-destructive restore
+// drill. It proves the snapshot contains a readable SQLite database before it is
+// reported as successful.
+func (s *Service) validateSnapshot(ctx context.Context, env []string, snapshot string) error {
+	if err := commandRun(ctx, env, nil, "restic", "check", "--read-data-subset=5%"); err != nil {
+		return err
+	}
+	drill, err := os.MkdirTemp(s.workRoot, "restore-drill-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(drill)
+	if err := commandRun(ctx, env, nil, "restic", "restore", snapshot, "--target", drill); err != nil {
+		return err
+	}
+	payload, manifest, err := recoveryPayload(drill)
+	if err != nil || manifest.DatabaseBackend != s.cfg.StoreBackend || manifest.ObjectBackend != s.cfg.ObjectBackend {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("unexpected backup manifest")
+	}
+	db, err := sql.Open("sqlite", filepath.Join(payload, "database", "hohoho.db"))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	var integrity string
+	if err := db.QueryRowContext(ctx, "pragma integrity_check").Scan(&integrity); err != nil {
+		return err
+	}
+	if integrity != "ok" {
+		return fmt.Errorf("sqlite integrity check: %s", integrity)
 	}
 	return nil
 }

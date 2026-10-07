@@ -41,6 +41,21 @@ func TestSettingsValidation(t *testing.T) {
 	}
 }
 
+func TestPolicyValidation(t *testing.T) {
+	if err := defaultPolicy().valid(); err != nil {
+		t.Fatalf("default policy rejected: %v", err)
+	}
+	for _, policy := range []Policy{
+		{Schedule: "", KeepDaily: 1, KeepWeekly: 1, KeepMonthly: 1},
+		{Schedule: "25:00", KeepDaily: 1, KeepWeekly: 1, KeepMonthly: 1},
+		{Schedule: "02:30", KeepDaily: 0, KeepWeekly: 1, KeepMonthly: 1},
+	} {
+		if err := policy.valid(); err == nil {
+			t.Fatalf("invalid policy accepted: %+v", policy)
+		}
+	}
+}
+
 func TestWriteSettingsUsesPrivatePermissions(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config", "backup.json")
 	value := settings{Version: 1, Repository: "archive:hohoho", RcloneConfig: "[archive]\ntype = local\n", ResticPassword: "secret"}

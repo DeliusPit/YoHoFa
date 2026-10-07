@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"hohoho/internal/config"
+	"hohoho/internal/maintenance"
 	"hohoho/internal/store"
 	"hohoho/internal/systembackup"
 )
@@ -23,6 +24,7 @@ type CoreDependencies struct {
 	Objects      *CoreObjectStorage
 	SystemBackup *systembackup.Service
 	Logger       *slog.Logger
+	Maintenance  *maintenance.Gate
 	// DocumentAnalyzer and DocumentAnalysisQueue detach document AI from storage.
 	// Upload works fully without them; when set, uploads are queued for analysis.
 	DocumentAnalyzer      CoreDocumentAnalyzer
@@ -152,6 +154,9 @@ func NewCore(deps CoreDependencies) http.Handler {
 		})
 	}
 	var handler http.Handler = mux
+	if deps.Maintenance != nil {
+		handler = maintenanceGuard(deps.Maintenance, handler)
+	}
 	if deps.Config.AuthUsername != "" && deps.Config.AuthPassword != "" {
 		handler = basicAuth(deps.Config.AuthUsername, deps.Config.AuthPassword, handler)
 	}
@@ -159,6 +164,17 @@ func NewCore(deps CoreDependencies) http.Handler {
 		handler = cors(deps.Config.CORSOrigin, handler)
 	}
 	return handler
+}
+
+func maintenanceGuard(gate *maintenance.Gate, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			release := gate.ReadLock()
+			defer release()
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // RunCoreDocumentAnalysis consumes the upload queue until the context ends.
@@ -177,7 +193,15 @@ func RunCoreDocumentAnalysis(ctx context.Context, deps CoreDependencies) {
 				deps.Logger.Error("automatische documentanalyse mislukt", "document_id", document.ID, "error", err)
 				continue
 			}
-			if err := deps.Store.UpdateCoreDocumentContent(ctx, document.ID, extractedText, translatedText, analysisJSON); err != nil {
+			var release func()
+			if deps.Maintenance != nil {
+				release = deps.Maintenance.ReadLock()
+			}
+			err = deps.Store.UpdateCoreDocumentContent(ctx, document.ID, extractedText, translatedText, analysisJSON)
+			if release != nil {
+				release()
+			}
+			if err != nil {
 				deps.Logger.Error("documentanalyse-resultaten opslaan mislukt", "document_id", document.ID, "error", err)
 			}
 		}
