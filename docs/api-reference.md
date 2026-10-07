@@ -1,5 +1,7 @@
 # API-overzicht
 
+> **Historische v2-API.** De actieve routes van de SQLite-basis staan in [API v3](api-v3.md). Onderstaande routes zijn niet geregistreerd door de huidige `cmd/api`.
+
 Dit document beschrijft de HTTP API van HoHoHo en verwijst per endpointgroep naar de fysieke Go-broncode waarin de handlers staan.
 
 ## Broncodekaart

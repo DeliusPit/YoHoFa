@@ -12,3 +12,5 @@ data/
 config/*
 !config/.gitkeep
 !config/.env.example
+!config/banks/
+!config/banks/*.yaml

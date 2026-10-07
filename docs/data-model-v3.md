@@ -1,10 +1,10 @@
 # Datamodel v3 — de eenvoudige kern
 
-Status: **doelontwerp, nog niet geïmplementeerd**.
+Status: **stappen 1 en 2 plus handmatige transacties geïmplementeerd**. Schema, versiebeheer, object-/waarde-/relatiebeheer en inkomsten/uitgaven met objecttoewijzingen werken via API en browser. Bankimport en documentflows zijn vervolgstappen.
 
-Dit document legt het complete vereenvoudigde doelmodel vast. De kern bestaat uit **negen tabellen**. Het [SQLite-referentieschema](target-schema-v3.sql) vertaalt de aangeleverde tabeldefinities naar de gekozen database, met dezelfde velden en relaties. Het [huidige datamodel](data-model.md) beschrijft de bestaande applicatie.
+Dit document legt het complete vereenvoudigde doelmodel vast. De kern bestaat uit **negen tabellen**. Het [canonieke SQLite-schema](../internal/store/core_schema.sql) vertaalt de aangeleverde tabeldefinities naar de gekozen database, met dezelfde velden en relaties, en wordt door de actieve store ingebed. Het [v2-datamodel](data-model.md) is historisch.
 
-De [technische doelarchitectuur v3](technical-architecture-v3.md) gebruikt uitsluitend SQLite voor gestructureerde data en Garage/S3 voor documenten. Eén Go-service levert de browserfrontend en API, gedeployed met Docker Compose.
+De [technische architectuur v3](technical-architecture-v3.md) gebruikt uitsluitend SQLite voor gestructureerde data en Garage/S3 voor documenten. Eén Go-service levert de browserfrontend en API, gedeployed met Docker Compose. De [actieve API](api-v3.md) beschrijft het object-, waarde- en relatiebeheer.
 
 Eén HoHoHo-deployment/database vertegenwoordigt één huishouden. Het doelmodel bevat geen `households`-tabel of `household_id`-velden.
 
@@ -55,6 +55,7 @@ bank_import_profiles
 - `amount_cents`: bedrag in integer centen.
 - `description`: optionele omschrijving.
 - `counterparty`: optionele tegenpartij.
+- `hidden`: 0/1-vlag voor verborgen transacties; verborgen transacties blijven bewaard maar tellen niet mee in standaardlijsten en dashboardtotalen.
 
 Een transactie is een genormaliseerde financiële mutatie: negatief betekent dat geld eruit gaat, positief dat geld binnenkomt. De transactie bevat geen categorie en geen direct `financial_object_id`. Classificatie en context komen uitsluitend uit de koppeltabel. Ook ontvangen bedragen blijven transacties; er komt geen vijfde objecttype bij.
 
@@ -68,14 +69,14 @@ De samengestelde primary key staat per transactie/object-paar één koppeling to
 
 Voor de applicatie wordt het bedrag op de koppeling gebruikt voor een expliciete toewijzing; NULL betekent een koppeling zonder expliciete bedragstoewijzing. Rapportages mogen een gekoppelde transactie niet automatisch voor ieder object volledig meetellen. Negatieve bedragen blijven uitgaven en positieve bedragen ontvangsten, zoals in de huidige applicatie.
 
-Bij volledige classificatie is de som van de toegewezen bedragen gelijk aan `transactions.amount_cents`. Een transactie mag tijdelijk geen koppeling hebben: deze is nog niet geclassificeerd. Een contextkoppeling zonder bedrag maakt een transactie op zichzelf niet volledig financieel geclassificeerd.
+Bij volledige classificatie is de som van de toegewezen bedragen gelijk aan `transactions.amount_cents`. Een transactie mag tijdelijk geen koppeling hebben: deze is nog niet geclassificeerd. Een contextkoppeling zonder bedrag maakt een transactie op zichzelf niet volledig financieel geclassificeerd. De handmatige transactieflow is geïmplementeerd, inclusief gedeeltelijke toewijzing en het getekende restant.
 
 Voorbeelden:
 
 - ALDI, -83,42 euro → Boodschappen (`expense`), -8342 cent.
 - Hypotheekbetaling, -1000 euro → Hypotheek Sparda (`debt`), -70000 cent én Hypotheekrente (`expense`), -30000 cent.
 
-Deze somregel wordt door de applicatie gecontroleerd; de referentie-SQL bevat geen aggregate constraint.
+De applicatie controleert gelijke tekens, unieke objectkoppelingen en het voorkomen van overtoewijzing. Transactiegegevens en koppelingen worden samen opgeslagen/vervangen in één korte SQLite-transactie; de schema-SQL bevat geen aggregate constraint. Bij categoriseren kan dezelfde tegenpartij automatisch worden toegepast op zichtbare transacties zonder bestaande objectkoppeling.
 
 ### `documents`
 
@@ -113,7 +114,7 @@ Een relatietype is hier niet nodig: de koppeling betekent alleen dat het documen
 - `value_date`: waardedatum.
 - `value_cents`: waarde in integer centen.
 
-Alle waarden worden als historie opgeslagen. De actuele waarde is de waarde met de meest recente `value_date`; er staat geen actuele-waarde-cache op `financial_objects`. Bij gelijke datums kan de applicatie `id DESC` als vaste tie-break gebruiken.
+Alle waarden worden als historie opgeslagen. De actuele waarde is de waarde met de meest recente `value_date`; er staat geen actuele-waarde-cache op `financial_objects`. Bij gelijke datums gebruikt de applicatie `id DESC` als vaste tie-break.
 
 | Object | Waardedatum | `value_cents` |
 | --- | --- | ---: |
@@ -129,32 +130,30 @@ Hetzelfde mechanisme dient voor woningwaarde, banksaldo, beleggingswaarde, rests
 - `id`: identificatie.
 - `name`: menselijke profielnaam, bijvoorbeeld ABN CSV.
 - `source_format`: bronformaat, bijvoorbeeld `csv`.
-- `configuration`: JSON-configuratie voor parsing en veldmapping.
+- `configuration`: JSON-weergave van het YAML-configuratiebestand uit `config/banks/` voor parsing en veldmapping.
 
-Bankspecifieke verschillen staan in configuratie, niet in vertakkingen zoals `if bank == "ABN"` of `if bank == "Sparda"`. Formaatparsers mogen generieke CSV/PDF/etc.-mechaniek implementeren; banknamen en bronkolommen bepalen niet de rest van de applicatie.
+Bankspecifieke verschillen staan in configuratie, niet in vertakkingen zoals `if bank == "ABN"` of `if bank == "Sparda"`. Formaatparsers mogen generieke CSV/PDF/etc.-mechaniek implementeren; banknamen en bronkolommen bepalen niet de rest van de applicatie. De beheerpagina leest en schrijft bestanden zoals `config/banks/abn.yaml`, `config/banks/sparda.yaml` en `config/banks/triodos.yaml`.
 
-ABN-voorbeeld:
+Configuratievoorbeeld:
 
-```json
-{
-  "delimiter": ";",
-  "date_field": "Datum",
-  "amount_field": "Bedrag",
-  "description_field": "Omschrijving",
-  "counterparty_field": "Naam tegenpartij"
-}
-```
+```yaml
+bank:
+  name: "Sparda-Bank West"
 
-Sparda gebruikt hetzelfde mechanisme met een ander profiel:
+source:
+  format: csv
+  delimiter: ";"
+  encoding: utf-8
 
-```json
-{
-  "delimiter": ";",
-  "date_field": "Buchungstag",
-  "amount_field": "Umsatz",
-  "description_field": "Verwendungszweck",
-  "counterparty_field": "Auftraggeber/Empfänger"
-}
+mapping:
+  transaction_date: Buchungstag
+  amount_cents: Betrag
+  description: Verwendungszweck
+  counterparty: Auftraggeber/Empfänger
+
+formats:
+  transaction_date: "02.01.2006"
+  decimal_separator: ","
 ```
 
 Elk profiel levert dezelfde canonieke velden: `transaction_date`, `amount_cents`, `description` en `counterparty`. Een bedrag zoals `-83,42` wordt exact -8342 integer centen.
@@ -166,7 +165,7 @@ Elk profiel levert dezelfde canonieke velden: `transaction_date`, `amount_cents`
 - `raw_data`: de originele bankregel als JSON.
 - `transaction_id`: optionele verwijzing naar de uiteindelijke transactie.
 
-Flow: bankbestand → importprofiel → ruwe regel → `bank_import_rows` → genormaliseerde transactie. Zolang nog geen transactie is aangemaakt kan `transaction_id` NULL zijn. Brongegevens blijven behouden als de normalisatie niet lukt.
+Flow: bankbestand → importprofiel → preview → ruwe regel → `bank_import_rows` → genormaliseerde transactie. De eerste importversie ondersteunt CSV-bestanden via de generieke bankconfiguratie en schrijft succesvolle imports direct naar `transactions`. Zolang nog geen transactie is aangemaakt kan `transaction_id` NULL zijn. Brongegevens blijven behouden als de normalisatie niet lukt.
 
 Voorbeeld van ruwe input:
 
@@ -219,7 +218,9 @@ Maak geen enum of aparte relatietypetabel. Nieuwe relatietekst introduceert ook 
 
 De kern heeft geen parent-hiërarchie, attributen-JSON, object-kind of lifecycle-model. Er zijn geen aparte dossiers, contracten, partijen, analyse- of importbatchtabellen. API en frontend gebruiken de kernbegrippen en mogen objecten per type tonen.
 
-## 4. Wat moet in de repository veranderen?
+## 4. Implementatie en vervolgstappen
+
+Gerealiseerd: `config.RuntimeFromEnv`, `store.OpenCore`, `httpserver.NewCore` en de nieuwe browserinterface. Schema-versie 1 wordt transactioneel aangemaakt zonder seeddata. De actieve startup opent alleen deze store en registreert geen v2-routes. De oude store/config/HTTP/import/backupbestanden blijven tijdelijk compileren voor de overgang, maar zijn niet actief.
 
 | Onderdeel | Nodige verandering |
 | --- | --- |
@@ -236,7 +237,7 @@ De kern heeft geen parent-hiërarchie, attributen-JSON, object-kind of lifecycle
 | Opslag | Eén SQLite-implementatie en Garage/S3-documentstore; database-/objectbackendkeuzes en opslagprofielen vervangen |
 | Herstel en checks | Backup/herstel, startup en bestaande verificatiescripts op het vereenvoudigde schema afstemmen |
 
-De belangrijkste code zit in `internal/store/`, `internal/httpserver/`, `internal/bankimport/`, `internal/documenttranslation/` en `web/src/main.js`. De huidige runtime heeft schema-initialisatie per databasebackend, waaronder `internal/store/postgres.go`. V3 krijgt één SQLite-migratielijn; alleen een bestand aan de huidige PostgreSQL-map `migrations/` toevoegen volstaat niet.
+De actieve basis zit in `internal/store/core.go`, `core_schema.sql`, `internal/httpserver/core.go`, `internal/config/runtime.go` en `web/src/main.js`. De PostgreSQL-map `migrations/` en oude schema-initialisatie behoren niet tot de actieve v3-migratielijn.
 
 ## 5. Nieuwe, lege administratie
 

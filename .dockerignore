@@ -3,6 +3,9 @@
 .env.*
 data/
 config/
+!config/
+!config/banks/
+!config/banks/*.yaml
 bin/
 dist/
 web/node_modules/

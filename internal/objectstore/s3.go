@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
+	"strings"
 	"sync"
 
 	"github.com/minio/minio-go/v7"
@@ -43,11 +45,27 @@ type Config struct {
 }
 
 func Open(ctx context.Context, cfg Config) (*S3, error) {
+	cfg = normalizeConfig(cfg)
 	store := &S3{endpoint: cfg.Endpoint, accessKey: cfg.AccessKey, secretKey: cfg.SecretKey, bucket: cfg.Bucket, useSSL: cfg.UseTLS, region: cfg.Region, pathStyle: cfg.PathStyle, createBucket: cfg.CreateBucket}
 	if cfg.Endpoint == "" || cfg.AccessKey == "" || cfg.SecretKey == "" || cfg.Bucket == "" {
 		return store, fmt.Errorf("S3 configuration is incomplete")
 	}
 	return store, store.checkBucket(ctx)
+}
+
+func normalizeConfig(cfg Config) Config {
+	cfg.Endpoint = strings.TrimSpace(cfg.Endpoint)
+	parsed, err := url.Parse(cfg.Endpoint)
+	if err == nil && parsed.Scheme != "" && parsed.Host != "" {
+		cfg.Endpoint = parsed.Host
+		if parsed.Scheme == "https" {
+			cfg.UseTLS = true
+		} else if parsed.Scheme == "http" {
+			cfg.UseTLS = false
+		}
+	}
+	cfg.Endpoint = strings.TrimRight(cfg.Endpoint, "/")
+	return cfg
 }
 
 func (s *S3) Ping(ctx context.Context) error {

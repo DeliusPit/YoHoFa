@@ -4,12 +4,8 @@
 -- Objecttypes: asset, debt, reserve, expense; validatie in de applicatie.
 -- Eén deployment/database vertegenwoordigt één huishouden.
 -- SQLite: INTEGER PRIMARY KEY voor IDs, TEXT voor ISO-datums en JSON.
--- Zie data-model-v3.md voor werking en migratie vanuit het bestaande model.
--- Referentiedefinitie voor een lege database, geen v2-upgrademigratie.
-
-PRAGMA foreign_keys = ON;
-
-BEGIN;
+-- Canonieke v3-schema-initialisatie, ingebed in de SQLite-store.
+-- De store regelt foreign keys, transactie en PRAGMA user_version.
 
 CREATE TABLE financial_objects (
     id          INTEGER PRIMARY KEY,
@@ -23,11 +19,13 @@ CREATE TABLE transactions (
     transaction_date TEXT NOT NULL,
     amount_cents     INTEGER NOT NULL,
     description      TEXT,
-    counterparty     TEXT
+    counterparty     TEXT,
+    status           TEXT NOT NULL DEFAULT 'I' CHECK (status IN ('I', 'A', 'F', 'U')),
+    hidden           INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))
 );
 
 CREATE TABLE transaction_financial_objects (
-    transaction_id      INTEGER NOT NULL REFERENCES transactions(id),
+    transaction_id      INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
     financial_object_id INTEGER NOT NULL REFERENCES financial_objects(id),
     amount_cents        INTEGER,
 
@@ -40,7 +38,12 @@ CREATE TABLE transaction_financial_objects (
 CREATE TABLE documents (
     id              INTEGER PRIMARY KEY,
     filename        TEXT NOT NULL,
-    object_key      TEXT NOT NULL,
+    object_key      TEXT NOT NULL UNIQUE,
+    mime_type       TEXT NOT NULL DEFAULT '',
+    size_bytes      INTEGER NOT NULL DEFAULT 0 CHECK (size_bytes >= 0),
+    sha256          TEXT NOT NULL DEFAULT '',
+    status          TEXT NOT NULL DEFAULT 'I' CHECK (status IN ('I', 'A', 'F', 'U')),
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     document_date   TEXT,
     description     TEXT,
     extracted_text  TEXT,
@@ -49,7 +52,7 @@ CREATE TABLE documents (
 );
 
 CREATE TABLE document_financial_objects (
-    document_id         INTEGER NOT NULL REFERENCES documents(id),
+    document_id         INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     financial_object_id INTEGER NOT NULL REFERENCES financial_objects(id),
 
     PRIMARY KEY (
@@ -60,7 +63,7 @@ CREATE TABLE document_financial_objects (
 
 CREATE TABLE object_values (
     id                  INTEGER PRIMARY KEY,
-    financial_object_id INTEGER NOT NULL REFERENCES financial_objects(id),
+    financial_object_id INTEGER NOT NULL REFERENCES financial_objects(id) ON DELETE CASCADE,
     value_date          TEXT NOT NULL,
     value_cents         INTEGER NOT NULL
 );
@@ -74,14 +77,14 @@ CREATE TABLE bank_import_profiles (
 
 CREATE TABLE bank_import_rows (
     id             INTEGER PRIMARY KEY,
-    profile_id     INTEGER NOT NULL REFERENCES bank_import_profiles(id),
+    profile_id     INTEGER NOT NULL REFERENCES bank_import_profiles(id) ON DELETE CASCADE,
     raw_data       TEXT NOT NULL CHECK (json_valid(raw_data)),
-    transaction_id INTEGER REFERENCES transactions(id)
+    transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL
 );
 
 CREATE TABLE object_relations (
-    source_object_id INTEGER NOT NULL REFERENCES financial_objects(id),
-    target_object_id INTEGER NOT NULL REFERENCES financial_objects(id),
+    source_object_id INTEGER NOT NULL REFERENCES financial_objects(id) ON DELETE CASCADE,
+    target_object_id INTEGER NOT NULL REFERENCES financial_objects(id) ON DELETE CASCADE,
     relation_type    TEXT NOT NULL,
 
     PRIMARY KEY (
@@ -90,5 +93,3 @@ CREATE TABLE object_relations (
         relation_type
     )
 );
-
-COMMIT;

@@ -1,6 +1,6 @@
 # Technisch Ontwerp
 
-> **Huidige implementatie.** De gewenste vereenvoudiging is beschreven in [Technische doelarchitectuur v3](technical-architecture-v3.md): één browserapp/Go-service met uitsluitend SQLite en Garage/S3 via Compose. Onderstaande beschrijving geldt voor de bestaande multi-backendapplicatie.
+> **Historisch v2-ontwerp.** De actieve [technische architectuur v3](technical-architecture-v3.md) gebruikt één browserapp/Go-service met uitsluitend SQLite en Garage/S3 via Compose. Onderstaande beschrijving geldt voor de vervangen multi-backendruntime en tijdelijk behouden legacycode.
 
 Dit document beschrijft de technische opbouw van HoHoHo en de belangrijkste ontwerpkeuzes per laag.
 

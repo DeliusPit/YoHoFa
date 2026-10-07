@@ -1,6 +1,6 @@
 # Datamodel
 
-> **Huidige implementatie (v2).** Dit document beschrijft het bestaande model. Het nieuwe doelmodel is [Datamodel v3 en migratieanalyse](data-model-v3.md), met het [SQLite-referentieschema](target-schema-v3.sql) en de [technische doelarchitectuur v3](technical-architecture-v3.md). V3 is nog niet geïmplementeerd; bij verschillen beschrijft dit document het huidige gedrag en de v3-documentatie de gewenste richting.
+> **Historisch v2-model.** De actieve v3-basis is beschreven in [Datamodel v3](data-model-v3.md), het [canonieke SQLite-schema](../internal/store/core_schema.sql) en de [technische architectuur v3](technical-architecture-v3.md). Onderstaand model wordt niet door `cmd/api` gebruikt.
 
 Dit document beschrijft het totale datamodel van HoHoHo. Het is geschreven als logisch model, met technische verwijzingen naar de huidige relationele tabellen. PostgreSQL is de primaire Compose-store; SQLite en MySQL houden functionele parity waar de feature ondersteund wordt.
 

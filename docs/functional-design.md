@@ -1,6 +1,6 @@
 # Functioneel Ontwerp
 
-> **Huidige functies en bestaand ontwerp.** V3 vereenvoudigt de domeinen naar [negen kerntabellen](data-model-v3.md) en gebruikt de [SQLite/Garage-browserarchitectuur](technical-architecture-v3.md). Eén deployment/database is één huishouden; v3 introduceert geen multi-household-model.
+> **Historische v2-functies.** De actieve v3-basis gebruikt [negen kerntabellen](data-model-v3.md) en de [SQLite/Garage-browserarchitectuur](technical-architecture-v3.md). Objecten, waarden en relaties werken; de overige v3-flows volgen later. Eén deployment/database is één huishouden.
 
 Dit document beschrijft de functionele opzet van HoHoHo. Het doel is een geïntegreerde huishoudadministratie waarin banktransacties, documenten, bezittingen, schulden, reserveringen en dossiers met elkaar verbonden kunnen worden.
 

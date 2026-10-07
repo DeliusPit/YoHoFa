@@ -1,49 +1,70 @@
 #!/usr/bin/env sh
 set -eu
 
-mkdir -p bin
-go build -o bin/hohoho-api ./cmd/api
+work=$(mktemp -d "${TMPDIR:-/tmp}/hohoho-v3-check.XXXXXX")
+pid=""
+cleanup() {
+  if [ -n "$pid" ]; then
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  fi
+  rm -rf "$work"
+}
+trap cleanup EXIT INT TERM
 
+go build -buildvcs=false -o "$work/hohoho-api" ./cmd/api
 export APP_ENV=development
 export HTTP_ADDR=127.0.0.1:18080
-export STORE_BACKEND=sqlite
-export DATABASE_PATH="/tmp/opencode/hohoho-check-$$.db"
-export CORS_ORIGIN=http://localhost:5173
+export DATABASE_PATH="$work/hohoho.db"
+unset AUTH_USERNAME AUTH_PASSWORD AUTH_USERNAME_BASE64 AUTH_PASSWORD_BASE64
+unset S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY
+base=http://127.0.0.1:18080
 
-bin/hohoho-api &
-pid=$!
-trap 'kill "$pid" 2>/dev/null || true' EXIT INT TERM
+start() {
+  "$work/hohoho-api" &
+  pid=$!
+  attempt=0
+  until curl -fsS "$base/healthz" >/dev/null 2>&1; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 50 ] || ! kill -0 "$pid" 2>/dev/null; then
+      exit 1
+    fi
+    sleep 0.1
+  done
+}
 
-sleep 1
-curl -fsS http://127.0.0.1:18080/healthz >/dev/null
-curl -fsS http://127.0.0.1:18080/api/v1/summary >/dev/null
-curl -fsS http://127.0.0.1:18080/api/v1/accounts >/dev/null
-curl -fsS -H 'Content-Type: application/json' -d '{"name":"Spaarrekening","iban":"NL00TEST0123456789","type":"savings","owner":"Huishouden","bankProfile":"triodos"}' http://127.0.0.1:18080/api/v1/accounts >/dev/null
-curl -fsS -X PATCH -H 'Content-Type: application/json' -d '{"name":"Spaarpot","iban":"NL00TEST0123456789","type":"savings","owner":"Huishouden","bankProfile":"triodos"}' http://127.0.0.1:18080/api/v1/accounts/2 >/dev/null
-curl -fsS -X DELETE http://127.0.0.1:18080/api/v1/accounts/2 >/dev/null
-curl -fsS http://127.0.0.1:18080/api/v1/main-categories >/dev/null
-curl -fsS -H 'Content-Type: application/json' -d '{"name":"Testcategorie"}' http://127.0.0.1:18080/api/v1/main-categories >/dev/null
-curl -fsS -X PATCH -H 'Content-Type: application/json' -d '{"name":"Overig"}' http://127.0.0.1:18080/api/v1/main-categories/11 >/dev/null
-curl -fsS -X DELETE http://127.0.0.1:18080/api/v1/main-categories/11 >/dev/null
-curl -fsS http://127.0.0.1:18080/api/v1/categories >/dev/null
-curl -fsS -H 'Content-Type: application/json' -d '{"mainCategoryId":2,"name":"Test subcategorie","kind":"expense","purpose":"daily"}' http://127.0.0.1:18080/api/v1/categories >/dev/null
-curl -fsS -X PATCH -H 'Content-Type: application/json' -d '{"mainCategoryId":2,"name":"Woonlasten","kind":"expense","purpose":"reservation"}' http://127.0.0.1:18080/api/v1/categories/2 >/dev/null
-curl -fsS -X DELETE http://127.0.0.1:18080/api/v1/categories/1 >/dev/null
-curl -fsS -F profile=generic -F file=@samples/bankimport/generic.csv http://127.0.0.1:18080/api/v1/imports/preview >/dev/null
-curl -fsS -F profile=triodos -F file=@samples/bankimport/triodos-example.csv http://127.0.0.1:18080/api/v1/imports/preview >/dev/null
-curl -fsS -F accountId=1 -F file=@samples/bankimport/triodos-example.csv http://127.0.0.1:18080/api/v1/imports >/dev/null
-curl -fsS -F accountId=1 -F file=@samples/bankimport/triodos-example.csv http://127.0.0.1:18080/api/v1/imports >/dev/null
-curl -fsS 'http://127.0.0.1:18080/api/v1/transactions?accountId=1&from=2026-01-01&to=2026-12-31&limit=10&offset=0' >/dev/null
-curl -fsS 'http://127.0.0.1:18080/api/v1/transactions/years' >/dev/null
-curl -fsS 'http://127.0.0.1:18080/api/v1/transactions/summary?accountId=1&from=2026-01-01&to=2026-12-31' >/dev/null
-curl -fsS 'http://127.0.0.1:18080/api/v1/transactions?accountId=1&search=triodos&limit=10&offset=0' >/dev/null
-curl -fsS 'http://127.0.0.1:18080/api/v1/transactions?accountId=1&from=2026-01-01&to=2026-12-31&limit=10&offset=10' >/dev/null
-curl -fsS 'http://127.0.0.1:18080/api/v1/transactions?accountId=1&uncategorized=true' >/dev/null
-curl -fsS -X PATCH -H 'Content-Type: application/json' -d '{"categoryId":2,"applyToSameCounterparty":true}' http://127.0.0.1:18080/api/v1/transactions/1/category >/dev/null
-curl -fsS -X PATCH http://127.0.0.1:18080/api/v1/transactions/1/hidden >/dev/null
-curl -fsS 'http://127.0.0.1:18080/api/v1/transactions?hidden=true&limit=10' >/dev/null
-curl -fsS -X DELETE http://127.0.0.1:18080/api/v1/transactions/1/hidden >/dev/null
-curl -fsS 'http://127.0.0.1:18080/api/v1/transactions?mainCategoryId=2' >/dev/null
-curl -fsS 'http://127.0.0.1:18080/api/v1/transactions?categoryId=2' >/dev/null
-curl -fsS 'http://127.0.0.1:18080/api/v1/reports/category-monthly?mainCategoryId=2' >/dev/null
-curl -fsS 'http://127.0.0.1:18080/api/v1/reports/main-category-period?from=2026-01-01&to=2026-12-31' >/dev/null
+start
+test "$(curl -fsS "$base/api/v1/financial-objects")" = "[]"
+curl -fsS -H 'Content-Type: application/json' -d '{"objectType":"asset","name":"Woning Sögel"}' "$base/api/v1/financial-objects" >/dev/null
+curl -fsS -H 'Content-Type: application/json' -d '{"objectType":"debt","name":"Hypotheek Sparda"}' "$base/api/v1/financial-objects" >/dev/null
+curl -fsS -H 'Content-Type: application/json' -d '{"valueDate":"2026-10-01","valueCents":59850000}' "$base/api/v1/financial-objects/1/values" >/dev/null
+curl -fsS -H 'Content-Type: application/json' -d '{"sourceObjectId":2,"targetObjectId":1,"relationType":"finances"}' "$base/api/v1/object-relations" >/dev/null
+curl -fsS -H 'Content-Type: application/json' -d '{"transactionDate":"2026-10-01","amountCents":-100000,"description":"Hypotheekbetaling","allocations":[{"financialObjectId":2,"amountCents":-100000}]}' "$base/api/v1/transactions" >/dev/null
+curl -fsS -H 'Content-Type: application/json' -d '{"transactionDate":"2026-10-02","amountCents":250000,"description":"Pensioen"}' "$base/api/v1/transactions" >/dev/null
+curl -fsS "$base/api/v1/financial-objects/1/values" >/dev/null
+curl -fsS "$base/api/v1/financial-objects/1/relations" >/dev/null
+test "$(curl -s -o /dev/null -w '%{http_code}' "$base/api/v1/accounts")" = "404"
+kill "$pid"
+wait "$pid"
+pid=""
+start
+summary=$(curl -fsS "$base/api/v1/summary")
+case "$summary" in *'"financialObjects":2'*) ;; *) exit 1 ;; esac
+case "$summary" in *'"objectValues":1'*) ;; *) exit 1 ;; esac
+case "$summary" in *'"objectRelations":1'*) ;; *) exit 1 ;; esac
+case "$summary" in *'"transactions":2'*) ;; *) exit 1 ;; esac
+transactions=$(curl -fsS "$base/api/v1/transactions")
+case "$transactions" in *'"balanceCents":150000'*) ;; *) exit 1 ;; esac
+dashboard=$(curl -fsS "$base/api/v1/dashboard?year=2026&month=10")
+case "$dashboard" in *'"netWorthCents":59850000'*) ;; *) exit 1 ;; esac
+case "$dashboard" in *'"balanceCents":150000'*) ;; *) exit 1 ;; esac
+curl -fsS "$base/api/v1/transactions?direction=expense&limit=1" >/dev/null
+curl -fsS -X PUT -H 'Content-Type: application/json' -d '{"transactionDate":"2026-10-02","amountCents":260000,"description":"Pensioen aangepast"}' "$base/api/v1/transactions/2" >/dev/null
+curl -fsS -X DELETE "$base/api/v1/transactions/2" >/dev/null
+curl -fsS -X DELETE -H 'Content-Type: application/json' -d '{"sourceObjectId":2,"targetObjectId":1,"relationType":"finances"}' "$base/api/v1/object-relations" >/dev/null
+# Verwijder in FK-volgorde: toewijzing (PUT zonder allocaties), waarde, dan objecten.
+curl -fsS -X PUT -H 'Content-Type: application/json' -d '{"transactionDate":"2026-10-01","amountCents":-100000,"description":"Hypotheekbetaling","allocations":[]}' "$base/api/v1/transactions/1" >/dev/null
+curl -fsS -X DELETE "$base/api/v1/financial-objects/1/values/1" >/dev/null
+curl -fsS -X DELETE "$base/api/v1/financial-objects/1" >/dev/null
+curl -fsS -X DELETE "$base/api/v1/financial-objects/2" >/dev/null
+test "$(curl -fsS "$base/api/v1/financial-objects")" = "[]"

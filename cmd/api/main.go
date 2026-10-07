@@ -2,156 +2,115 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"hohoho/internal/config"
-	"hohoho/internal/documenttranslation"
 	"hohoho/internal/httpserver"
-	"hohoho/internal/objectstore"
 	"hohoho/internal/store"
 	"hohoho/internal/systembackup"
 )
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if err := run(logger); err != nil {
+		logger.Error("Applicatie kon niet worden gestart", "error", err)
+		os.Exit(1)
+	}
+}
+
+func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	configuration, err := config.NewManager(config.FromEnv())
-	if err != nil {
-		logger.Error("load system configuration", "error", err)
-		os.Exit(1)
+	cfg := config.RuntimeFromEnv()
+	if err := cfg.Validate(); err != nil {
+		return err
 	}
-	cfg := configuration.Effective()
-	if recovered, err := systembackup.RunPendingRecovery(ctx, cfg, logger); err != nil {
-		logger.Error("restore system backup", "error", "recovery_failed")
-		os.Exit(1)
+	backupCfg := backupConfigFromRuntime(cfg)
+	if recovered, err := systembackup.RunPendingRecovery(ctx, backupCfg, logger); err != nil {
+		return err
 	} else if recovered {
-		configuration, err = config.NewManager(config.FromEnv())
-		if err != nil {
-			logger.Error("reload recovered system configuration", "error", err)
-			os.Exit(1)
-		}
-		cfg = configuration.Effective()
+		logger.Info("Recovery uitgevoerd voor start")
 	}
-	if cfg.AppEnv == "production" && (cfg.AuthUsername == "" || cfg.AuthPassword == "") {
-		logger.Error("authentication is required in production; set AUTH_USERNAME and AUTH_PASSWORD")
-		os.Exit(1)
-	}
-
-	db, err := openDatabase(ctx, cfg)
+	db, err := store.OpenCore(ctx, cfg.DatabasePath)
 	if err != nil {
-		logger.Error("open store", "backend", cfg.StoreBackend, "error", err)
-		os.Exit(1)
+		return err
 	}
 	defer db.Close()
-	documents, _ := db.(store.DocumentRepository)
-	assets, _ := db.(store.AssetRepository)
-	liabilities, _ := db.(store.LiabilityRepository)
-	reservations, _ := db.(store.ReservationRepository)
-	cases, _ := db.(store.CaseRepository)
-	relations, _ := db.(store.EntityRelationRepository)
-	events, _ := db.(store.DomainEventRepository)
-	objects, err := openObjectStore(ctx, cfg, documents != nil)
-	if err != nil {
-		logger.Error("open object store; document functionality is unavailable", "error", err)
-	}
-	backup, err := systembackup.New(ctx, cfg, logger)
-	if err != nil {
-		logger.Error("load backup configuration", "error", "configuration_unavailable")
-	} else {
-		backup.SetShutdown(stop)
-	}
-	translation := documenttranslation.New(documents, objects, cfg.PDFAIURL, logger)
 
-	server := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpserver.New(httpserver.Dependencies{Config: cfg, Store: db, Documents: documents, Assets: assets, Liabilities: liabilities, Reservations: reservations, Cases: cases, Relations: relations, Events: events, Objects: objects, ObjectStoreRequired: documents != nil, Configuration: configuration, SystemBackup: backup, DocumentTranslation: translation, Logger: logger}),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
-	go func() {
-		logger.Info("api listening", "addr", cfg.HTTPAddr, "store_backend", cfg.StoreBackend)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("listen", "error", err)
-			stop()
-		}
-	}()
-
-	<-ctx.Done()
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.Error("shutdown", "error", err)
-	}
-}
-
-func openDatabase(ctx context.Context, cfg config.Config) (store.Backend, error) {
-	connectionString := cfg.DatabaseURL
-	if cfg.StoreBackend == "mysql" {
-		connectionString = cfg.MySQLDSN
-	}
-	retryCtx, cancelRetry := context.WithTimeout(ctx, 60*time.Second)
-	defer cancelRetry()
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	for {
-		attemptCtx, cancelAttempt := context.WithTimeout(retryCtx, 15*time.Second)
-		db, err := store.Open(attemptCtx, cfg.StoreBackend, connectionString, cfg.DatabasePath)
-		cancelAttempt()
-		if err == nil {
-			return db, nil
-		}
-		select {
-		case <-retryCtx.Done():
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			return nil, err
-		case <-ticker.C:
-		}
-	}
-}
-
-func openObjectStore(ctx context.Context, cfg config.Config, enabled bool) (objectstore.Store, error) {
-	if !enabled {
-		return nil, nil
-	}
-	if cfg.ObjectBackend == "filesystem" {
-		objects, err := objectstore.NewFilesystem(cfg.ObjectFilesystemRoot)
+	// De S3-client wordt uit de opgeslagen runtimeconfiguratie geopend en kan
+	// via het configuratiescherm warm worden verwisseld; er is geen filesystem-backval.
+	objectStorage := httpserver.NewCoreObjectStorage()
+	if cfg.S3Endpoint != "" {
+		objectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		client, err := httpserver.OpenCoreObjectStore(objectCtx, cfg)
+		cancel()
 		if err != nil {
-			return nil, err
+			logger.Warn("S3-documentopslag is nog niet bereikbaar", "error", err)
 		}
-		return objects, objects.Ping(ctx)
+		objectStorage.Swap(client)
 	}
-	if cfg.ObjectBackend != "s3" {
-		return nil, fmt.Errorf("unknown object store backend %q", cfg.ObjectBackend)
+	backupService, err := systembackup.New(ctx, backupCfg, logger)
+	if err != nil {
+		return err
 	}
+	coreDeps := httpserver.CoreDependencies{Config: cfg, Store: db, Objects: objectStorage, SystemBackup: backupService, Logger: logger}
+	// De PDF-AI-analyse blijft bewust los van de opslag: zonder URL is er
+	// geen analyzer en werkt uploaden gewoon door.
+	if analyzer := pdfAIAnalyzer(cfg, objectStorage); analyzer != nil {
+		coreDeps.DocumentAnalyzer = analyzer
+		coreDeps.DocumentAnalysisQueue = make(chan store.CoreDocument, 16)
+	}
+	server := &http.Server{
+		Addr: cfg.HTTPAddr, ReadHeaderTimeout: 5 * time.Second,
+		Handler: httpserver.NewCore(coreDeps),
+	}
+	backupService.SetShutdown(func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+	})
+	if coreDeps.DocumentAnalyzer != nil {
+		go httpserver.RunCoreDocumentAnalysis(ctx, coreDeps)
+	}
+	result := make(chan error, 1)
+	go func() {
+		logger.Info("HoHoHo v3 gestart", "addr", cfg.HTTPAddr, "database", "sqlite", "schema_version", store.CoreSchemaVersion)
+		result <- server.ListenAndServe()
+	}()
+	select {
+	case err := <-result:
+		if err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return server.Shutdown(shutdownCtx)
+	}
+}
 
-	retryCtx, cancelRetry := context.WithTimeout(ctx, 60*time.Second)
-	defer cancelRetry()
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-	for {
-		attemptCtx, cancelAttempt := context.WithTimeout(retryCtx, 15*time.Second)
-		objects, err := objectstore.Open(attemptCtx, objectstore.Config{Endpoint: cfg.S3Endpoint, AccessKey: cfg.S3AccessKey, SecretKey: cfg.S3SecretKey, Bucket: cfg.S3Bucket, UseTLS: cfg.S3UseTLS, Region: cfg.S3Region, PathStyle: cfg.S3PathStyle, CreateBucket: cfg.S3CreateBucket})
-		cancelAttempt()
-		if err == nil {
-			return objects, nil
-		}
-		select {
-		case <-retryCtx.Done():
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			return nil, err
-		case <-ticker.C:
-		}
+func backupConfigFromRuntime(cfg config.Runtime) config.Config {
+	configPath := cfg.ConfigPath
+	if !filepath.IsAbs(configPath) {
+		configPath, _ = filepath.Abs(configPath)
+	}
+	backupWorkRoot := cfg.BackupWorkRoot
+	if !filepath.IsAbs(backupWorkRoot) {
+		backupWorkRoot, _ = filepath.Abs(backupWorkRoot)
+	}
+	return config.Config{
+		AppEnv: cfg.AppEnv, HTTPAddr: cfg.HTTPAddr, CORSOrigin: cfg.CORSOrigin, WebDir: cfg.WebDir,
+		AuthUsername: cfg.AuthUsername, AuthPassword: cfg.AuthPassword,
+		StoreBackend: "sqlite", DatabasePath: cfg.DatabasePath,
+		ObjectBackend: "s3", S3Endpoint: cfg.S3Endpoint, S3AccessKey: cfg.S3AccessKey, S3SecretKey: cfg.S3SecretKey,
+		S3Bucket: cfg.S3Bucket, S3UseTLS: cfg.S3UseTLS, S3Region: cfg.S3Region, S3PathStyle: cfg.S3PathStyle, S3CreateBucket: cfg.S3CreateBucket,
+		PDFAIURL: cfg.PDFAIURL, ConfigPath: configPath, BackupWorkRoot: backupWorkRoot,
 	}
 }

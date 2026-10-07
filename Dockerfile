@@ -14,22 +14,14 @@ RUN go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 RUN CGO_ENABLED=0 GOOS=linux go build -o /out/hohoho-api ./cmd/api
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/hohoho-recover ./cmd/recover
 
-FROM rclone/rclone:1.75.0 AS rclone
+FROM alpine:3.23
 
-FROM postgres:18
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates mariadb-client restic \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ca-certificates restic rclone sqlite
 WORKDIR /app
-COPY --from=rclone /usr/local/bin/rclone /usr/local/bin/rclone
 COPY --from=api-build /out/hohoho-api /app/hohoho-api
-COPY --from=api-build /out/hohoho-recover /app/hohoho-recover
 COPY --from=web-build /src/web/dist /app/web/dist
-
-RUN pg_dump --version && mariadb-dump --version && rclone version && restic version
+COPY config/banks /app/config/banks
 
 EXPOSE 8080
 ENTRYPOINT ["/app/hohoho-api"]

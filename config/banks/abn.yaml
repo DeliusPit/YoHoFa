@@ -1,0 +1,17 @@
+bank:
+  name: "ABN AMRO"
+
+source:
+  format: csv
+  delimiter: ";"
+  encoding: utf-8
+
+mapping:
+  transaction_date: Datum
+  amount_cents: Bedrag
+  description: Omschrijving
+  counterparty: Naam tegenpartij
+
+formats:
+  transaction_date: "02-01-2006"
+  decimal_separator: ","

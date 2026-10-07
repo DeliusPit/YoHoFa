@@ -46,6 +46,20 @@ func TestOpenDoesNotCreateMissingBucketWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestNormalizeConfigAcceptsURLStyleEndpoint(t *testing.T) {
+	cfg := normalizeConfig(Config{Endpoint: "http://garage.local:3900/", UseTLS: true})
+	if cfg.Endpoint != "garage.local:3900" {
+		t.Fatalf("endpoint = %q", cfg.Endpoint)
+	}
+	if cfg.UseTLS {
+		t.Fatal("http endpoint should disable TLS")
+	}
+	cfg = normalizeConfig(Config{Endpoint: "https://garage.local:3900"})
+	if cfg.Endpoint != "garage.local:3900" || !cfg.UseTLS {
+		t.Fatalf("https endpoint normalized to endpoint=%q tls=%v", cfg.Endpoint, cfg.UseTLS)
+	}
+}
+
 func TestLiveS3(t *testing.T) {
 	endpoint := os.Getenv("S3_ENDPOINT")
 	accessKey := os.Getenv("S3_ACCESS_KEY")

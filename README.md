@@ -1,204 +1,97 @@
-# HoHoHo
+# HoHoHo v3
 
-House Hold Hosting: applicatie-opbouw voor de administratie van een huishouden.
+House Hold Hosting: huishoudadministratie rond financiële objecten, met uitsluitend SQLite voor data en Garage/S3 voor originele documenten. Eén deployment is één huishouden; de gebruiker werkt in een browser.
 
-## Doelarchitectuur v3 (in voorbereiding)
+## Huidige stap: de lege basis
 
-Het [v3-kernmodel](docs/data-model-v3.md) bestaat uit negen tabellen rond financiële objecten. De [technische doelarchitectuur](docs/technical-architecture-v3.md) wordt een volledig browserbediende applicatie met één Go-service, uitsluitend SQLite voor data en Garage/S3 voor documenten, gedeployed via Docker Compose. De instructies hieronder beschrijven nog de bestaande runtime.
+Stappen 1 en 2 zijn gerealiseerd:
 
-## Doel
+- Bestaande data hoeft niet behouden of geconverteerd te worden.
+- Startup maakt een nieuwe SQLite-database met precies negen lege domeintabellen, zonder seeds.
+- Onder **Balans & Planning** zijn financiële objecten (`asset`, `debt`, `expense`, `reserve`), waardehistorie en objectrelaties via de browser te beheren; dezelfde functies zijn via de API beschikbaar.
+- Balans & Planning heeft een submenu per objectsoort en vier aanmaakknoppen. De objecten staan in vier gelijke kaders: bezittingen linksboven, schulden linksonder, lasten rechtsboven en reserveringen rechtsonder. Het submenu brengt het betreffende kader in beeld; aanmaken/wijzigen opent het gedeelde formulier eronder.
+- Wanneer een financieel object is geselecteerd toont Balans & Planning ook de nieuwste gekoppelde transacties met bedrag en objecttoewijzing.
+- Onder **Configuratie** staat een v3-overzicht van SQLite, Garage/S3, applicatiestatus en het backup/recovery-blok uit de vorige versie. Garage/S3-instellingen kunnen daar worden opgeslagen; secrets worden niet teruggegeven aan de browser en wijzigingen gelden na een herstart. Databasekeuzes worden niet live gewisseld: v3 gebruikt de vaste SQLite/Garage-combinatie.
+- Onder **Applicatie Configuratie** staan twee AI-koppelingen: een PDF/OCR-AI URL voor documentverwerking en een Transactieclassificatie-AI URL voor automatische classificatie van banktransacties.
+- Backup en recovery gebruiken opnieuw restic/rclone. De runtime image bevat deze tools; backups omvatten SQLite, Garage/S3-objecten en configuratie. Recovery wordt gepland met bevestiging `HERSTEL` en uitgevoerd bij de volgende start.
+- **Bankimport Configuratie** beheert YAML-bestanden onder `config/banks/` zoals `abn.yaml`, `sparda.yaml` en `triodos.yaml`. Elk bestand beschrijft bronformaat, mapping naar `transaction_date`, `amount_cents`, `description` en `counterparty`, plus datum-/bedragformaten. Opslaan valideert het YAML-bestand en synchroniseert generiek naar `bank_import_profiles`; er is geen bankspecifieke Go-vertakking.
+- Het tabblad **Import** kan een bankconfiguratie selecteren, een CSV-export uploaden, een preview tonen en de genormaliseerde transacties opslaan. Ruwe CSV-regels worden per geïmporteerde transactie in `bank_import_rows` bewaard.
+- Het tabblad **Inkomsten & Uitgaven** bevat handmatige transacties: aanmaken, wijzigen en verwijderen, met datum, bedrag, omschrijving en tegenpartij. Bedragen kunnen over financiële objecten worden verdeeld; ongeclassificeerde en gedeeltelijk toegewezen transacties zijn toegestaan.
+- Transacties worden vanuit de browser verborgen in plaats van fysiek verwijderd. Onder **Toon** kunnen verborgen transacties apart worden bekeken en weer zichtbaar worden gemaakt. Bij categoriseren kan dezelfde categorisatie automatisch worden toegepast op zichtbare transacties met dezelfde tegenpartij die nog niet geclassificeerd zijn.
+- Het hoofdmenu staat in deze volgorde: **Dashboard**, **Balans & Planning**, **Inkomsten & Uitgaven**, **Documenten**, **Import**, **Configuratie**. Documenten, Import en Configuratie zijn voorbereid met een melding dat hun functies nog volgen. Navigatie, browsertitel en directe hashlinks volgen het actieve tabblad; wisselen tussen tabs bewaart de ingevulde formulieren.
+- Het **Dashboard** gebruikt de afgeronde panelen en jaar-/maandknoppen uit de oude vormgeving. Links staan balans en planning op de laatste dag van de geselecteerde periode, rechts inkomsten, uitgaven, saldo en aantallen binnen die periode. Waarderingen worden historisch gelezen; reserveringen en lasten staan apart van de netto balans.
+- Het transactieoverzicht toont inkomsten, uitgaven en saldo van de selectie, plus paginering en een filter op richting. Totalen tellen elke transactie één keer, onafhankelijk van het aantal koppelingen.
+- SQLite gebruikt foreign keys, WAL, een lock-wachttijd en `PRAGMA user_version` voor schema-evolutie.
+- Eén Go-service serveert frontend en API. Opslagprofielen en `config/storage.json` worden door deze runtime niet gelezen.
 
-Een zo veel mogelijk in Go geschreven applicatie met een kleine JavaScript frontend en configureerbare opslag.
-
-## Stack
-
-- Backend: Go HTTP API
-- Frontend: Vite + vanilla JavaScript
-- Data tijdens lokale ontwikkeling en productie: configureerbaar per opslagprofiel
-- Geconfigureerde databasekeuzes: PostgreSQL, SQLite en MySQL
-- PostgreSQL schema: SQL-bestanden in `migrations/` en schema-check bij starten
-- Lokaal draaien: Go API + Vite frontend
-- Deployment: Docker Compose met PostgreSQL en S3-compatible objectopslag
-
-## Structuur
-
-- `cmd/api`: startpunt van de backend
-- `internal/config`: configuratie via environment variables of een beveiligd configuratiebestand
-- `internal/httpserver`: HTTP routes en handlers
-- `internal/store`: data-opslag via SQLite, PostgreSQL, MySQL of memory-store
-- `migrations`: database schema migraties
-- `web`: frontend
-- `scripts`: hulpscripts voor lokale en remote taken
-
-## Lokaal ontwikkelen met PostgreSQL
-
-Vereisten: Go en Node.js.
-
-De standaardconfiguratie gebruikt `STORE_BACKEND=postgres` met `DATABASE_URL`. Via Docker Compose draait PostgreSQL naast de applicatie.
-
-```sh
-cp .env.example .env
-docker compose up -d postgres
-./scripts/dev-api.sh
-```
-
-Frontend:
-
-```sh
-cd web
-npm install
-npm run dev
-```
-
-API healthcheck:
-
-```sh
-curl http://localhost:8080/healthz
-```
-
-Samenvatting:
-
-```sh
-curl http://localhost:8080/api/v1/summary
-```
-
-Snelle lokale check met tijdelijke SQLite database:
-
-```sh
-./scripts/check-local.sh
-```
+Bankimportconfiguratie, CSV-preview/import, backup/herstel en handmatige transacties zijn aangesloten. De volgende bankimportstap is deduplicatie en verdere controle/afhandeling van geïmporteerde regels. Oude v2-code en tests staan tijdelijk nog in de repository; `cmd/api` gebruikt uitsluitend de nieuwe kern.
 
 ## Docker Compose
 
-De applicatiecontainer bouwt de Go API uit `cmd/api` en de Vite frontend uit `web/`. De Go-server serveert de frontend en gebruikt PostgreSQL als actieve databasebackend.
+Maak lokale configuratie vanuit `.env.example` en vul authenticatie en Garage-toegang in. Commit de ingevulde bestanden niet.
 
 ```sh
-docker compose -f compose.yml up --build -d
+cp .env.example .env
+docker compose up --build -d
 ```
 
-Controleer de draaiende applicatie daarna met:
+- Browser: `http://localhost:8080`.
+- Productie vereist `AUTH_USERNAME` en `AUTH_PASSWORD`.
+- De database staat op de host in `data/v3/hohoho.db`, gemount als `/app/data/hohoho.db`.
+- De huidige Compose-definitie bevat alleen de applicatieservice en sluit aan op een bestaande Garage-installatie via `S3_*`. Een beheerde Garage-service/bootstrap volgt in de deploymentstap.
+- `config/.env` wordt tijdelijk nog als tweede env-file ingelezen voor bestaande installatiecredentials; die waarden gaan vóór `.env`. Gebruik voor nieuwe inrichting de root-`.env` en voorkom dubbele instellingen.
+- `/healthz` controleert de SQLite-kern; `/readyz` controleert ook de S3-bucket. Zonder Garage blijft objectbeheer bruikbaar, maar is `/readyz` niet gereed.
+
+Een oude database wordt niet automatisch gewist of omgezet. Als een expliciet `DATABASE_PATH` naar een oud schema wijst, weigert startup dat bestand. De nieuwe default en Compose-volume gebruiken een afzonderlijke v3-map. Oude databasebestanden of HoHoHo-documentobjecten verwijderen is een aparte uitvoeringsstap.
+
+## Lokaal ontwikkelen
+
+Vereisten: Go 1.25+ en Node.js 24+.
 
 ```sh
-./scripts/check-runtime.sh
+./scripts/dev-api.sh
 ```
 
-PostgreSQL-data staat onder `data/postgres`; SQLite-bestanden staan onder `data/sqlite` en objecten van de filesystem-backend onder `data/objects`. Voor S3-opslag configureert u een S3-compatible provider, zoals Garage. SQLite-paden moeten absoluut zijn, mogen geen URI of `/` zijn en blijven in Compose beperkt tot `/app/data/sqlite` via `DATABASE_DATA_ROOT`.
-
-De optionele MySQL 8.4-service start niet standaard. Vul de vier `MYSQL_*`-waarden uit `.env.example` in en start hem alleen met:
+Dit start de API met `data/v3/hohoho.db`. In een tweede terminal, vanuit `web/`:
 
 ```sh
-docker compose -f compose.yml --profile mysql up -d mysql
+npm ci
+npm run dev
 ```
 
-De persistente MySQL-data staat onder `data/mysql`. Poort 3306 is uitsluitend op `127.0.0.1` van de host gepubliceerd. De lokale Compose-service configureert geen TLS; kies voor deze service expliciet MySQL TLS-modus `disabled`, uitsluitend omdat applicatie en database over het afgeschermde Compose-netwerk communiceren.
+Vite proxy't de API naar poort 8080. Voor frontendassets die de Go-service zelf serveert: voer `npm run build` uit vanuit `web/`.
 
-## Documenten
-
-Documentmetadata en koppelingen staan in de geconfigureerde relationele database. De originele bestanden kunnen in S3-compatibele objectopslag of op het lokale bestandssysteem staan. Compose koppelt het bestandssysteem standaard aan `/app/data/objects`; dit pad moet absoluut zijn en mag niet `/` zijn. Voor S3 gebruikt de applicatie `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_USE_TLS`, `S3_REGION`, `S3_PATH_STYLE` en `S3_CREATE_BUCKET`.
-
-Voor Garage bevat `S3_ENDPOINT` alleen `host:poort`, zonder `http://` of pad. Stel `S3_REGION` in op de regio van de Garage-key, gebruik normaal `S3_PATH_STYLE=true` en zet `S3_CREATE_BUCKET=false` wanneer de bucket vooraf in Garage is aangemaakt.
-
-Zie `docs/storage-architecture.md` voor de opslagmatrix, schema-aanpak, parity-checks en geplande migratiepaden.
-
-### Opslagconfiguratie
-
-`config/storage.json` op de host, gekoppeld als `/app/config/storage.json`, is de gezaghebbende opslagconfiguratie. Het bestand bevat database- en objectopslagcredentials en is daarom geheim: maak geen commit of backup zonder passende versleuteling en toegangsbeperking. Als het bestand bestaat, wint het volledig van de opslagvariabelen; velden worden nooit afzonderlijk met environment variables samengevoegd. De root `.env` bevat alleen Compose-credentials voor de lokale PostgreSQL- en optionele MySQL-service. Productie-authenticatie en optionele providerneutrale bootstrapwaarden staan lokaal in `config/.env`, gebaseerd op `config/.env.example`, met bestandsmodus `0600`. Zonder zowel `AUTH_USERNAME` als `AUTH_PASSWORD` start de productiebackend niet.
-
-Voor een eenmalige omzetting van de huidige Compose-variabelen naar het bestand gebruikt u exact:
+## Basis-API
 
 ```sh
-CONFIG_BOOTSTRAP_FROM_ENV=true docker compose -f compose.yml up -d
+curl http://localhost:8080/api/v1/financial-objects
+curl -H 'Content-Type: application/json' \
+  -d '{"objectType":"asset","name":"Woning Sögel"}' \
+  http://localhost:8080/api/v1/financial-objects
 ```
 
-Daarna gebruikt elke normale herstart alleen het bestand:
+Zie [API v3](docs/api-v3.md) voor objectbeheer, waarden, relaties en foutafhandeling. De voorbeelden hierboven gaan uit van lokale ontwikkeling zonder authenticatie.
+
+## Verificatie
 
 ```sh
-docker compose -f compose.yml up -d
+go build ./...
+go test ./...
+./scripts/check-local.sh
 ```
 
-Zonder bestand blijft de bestaande environment-configuratie alleen-lezen werken wanneer opslagvariabelen aanwezig zijn. In productie zijn zowel `AUTH_USERNAME` als `AUTH_PASSWORD` verplicht; bij een ontbrekende waarde start de backend niet. Met volledige authenticatie staat `CONFIG_EDITABLE=true` wijzigingen via `Configuratie > Systeemconfiguratie` toe. Alleen niet-productieontwikkeling op een loopback-adres mag zonder authenticatie wijzigen; andere niet-productieomgevingen worden zonder volledige authenticatie alleen-lezen. Secrets worden uitsluitend als ingesteld/niet ingesteld getoond. Wijzigingen worden atomisch met bestandsmodus `0600` opgeslagen en gelden na een herstart.
+De lokale check gebruikt een tijdelijk databasebestand, controleert CRUD en herstart/persistentie en ruimt alleen die testgegevens op. De tests bewaken onder meer negen lege tabellen, foreign keys op nieuwe verbindingen, JSON-validatie, actuele waarden en het weigeren van oude/nieuwere schema's.
 
-Een succesvolle wijziging schrijft opslagconfiguratieversie 3. Daarin blijven de afzonderlijke SQLite-, PostgreSQL- en MySQL-instellingen bewaard wanneer een andere backend wordt gekozen; hetzelfde geldt voor filesystem- en S3-instellingen. De PDF-AI-endpoint, lokale LLM-endpoint en de opties voor documentanalyse en transactieclassificatie worden daarin ook bewaard. PDF-documentanalyse loopt via de centrale PDF-AI-service, inclusief OCR waar nodig. Transactieclassificatie is nog niet actief. Bestaande versie-2- en ongenummerde bestanden blijven compatibel en worden pas bij een succesvolle wijziging naar versie 3 geschreven. De veilige GET-API retourneert alleen of wachtwoorden/sleutels zijn ingesteld, nooit de geheimen zelf.
+## Structuur en documentatie
 
-De profielen `local`, `server` en `central` zijn ondersteund. `local` combineert SQLite met filesystem-opslag; `server` en `central` combineren PostgreSQL of MySQL met filesystem- of S3-opslag. Alle drie databases implementeren documentenmetadata, assets, liabilities, dossiers, relaties, waarderingen en tijdlijnen. MySQL TLS is beperkt tot `required` (standaard, zonder plaintext fallback) en expliciet `disabled` voor een vertrouwd lokaal netwerk zoals Compose. Eerdere `preferred`-instellingen worden veilig als `required` behandeld. CA-instellingen zijn nog niet geïmplementeerd. Een andere selectie wijzigt alleen de actieve backend en migreert geen bestaande databasegegevens of objecten.
+- `cmd/api`: enige actieve backend-entrypoint.
+- `internal/config/runtime.go`: vaste v3-runtimeconfiguratie.
+- `internal/store/core.go` en `core_schema.sql`: actieve SQLite-kern en canoniek schema.
+- `internal/httpserver/core.go`: actieve v3-routes.
+- `web/src/main.js` en `core.css`: browserinterface voor de basis.
+- `internal/objectstore/s3.go`: S3-client voor Garage.
+- [Datamodel v3](docs/data-model-v3.md).
+- [Technische architectuur en vervolgstappen](docs/technical-architecture-v3.md).
+- [Documentatie-index](docs/index.md).
 
-### Systeembackup
-
-`Configuratie > Systeembackup` maakt handmatig een versleutelde restic-snapshot van de actieve database, documenten en configuratie. Rclone verzorgt de verbinding met de gekozen opslagprovider. Vul als doel een bestaande rclone-remote en pad in, bijvoorbeeld `backup:hohoho`, samen met de bijbehorende rclone-configuratie en een afzonderlijk restic-wachtwoord. Opslaan valideert de opslag en initialiseert uitsluitend een lege doelmap; de knop `Nu backup maken` wordt pas daarna actief.
-
-De backupinstellingen staan met bestandsmodus `0600` in `config/backup.json`. Dit bestand bevat de rclone-configuratie en het restic-wachtwoord en mag niet ongecodeerd buiten het systeem worden bewaard. Bewaar het restic-wachtwoord daarnaast in een afzonderlijke herstelkluis: zonder dat wachtwoord kunnen snapshots niet worden hersteld. Gebruik voor S3 altijd een andere bucket dan de live documentenbucket; de applicatie blokkeert een rechtstreeks geconfigureerde overlap.
-
-Onder `Configuratie > Systeembackup > Backup herstellen` kan een bestaande snapshot worden gekozen. De applicatie maakt eerst een extra veiligheidsbackup, herstart in herstelmodus en vervangt daarna database, documenten en `storage.json`. Tijdens de herstart is de applicatie tijdelijk niet bereikbaar. De gekozen snapshot moet hetzelfde database- en objectopslagtype gebruiken als de actieve configuratie.
-
-Als de webinterface niet start, is hetzelfde herstel als onderhoudscommando beschikbaar:
-
-```sh
-docker compose stop backend
-docker compose run --rm --no-deps --entrypoint /app/hohoho-recover backend --list
-docker compose run --rm --no-deps --entrypoint /app/hohoho-recover backend --snapshot SNAPSHOT_ID
-docker compose up -d backend
-```
-
-Voer het herstelcommando alleen uit terwijl de backend is gestopt. Ook het noodcommando maakt standaard eerst een veiligheidsbackup; `--no-safety-backup` is uitsluitend bedoeld voor situaties waarin de actieve opslag niet meer leesbaar is.
-
-Documenten zijn zelfstandige objecten. Een koppeling met een transactie verwijderen verwijdert het document of het onderliggende object in filesystem/S3 niet.
-
-## Bezittingen
-
-Bezittingen zijn zelfstandige domeinobjecten in de relationele store. Ze kunnen via generieke relaties aan transacties en via de bestaande documentlaag aan documenten worden gekoppeld. Waarden worden intern als centen opgeslagen; de valuta staat per bezitting vastgelegd. `assets.current_value` is uitsluitend een transactioneel bijgewerkte cache van de nieuwste regel in `asset_valuations` en wordt niet rechtstreeks via assetbeheer aangepast.
-
-## Schulden
-
-Schulden zijn zelfstandige domeinobjecten met type, schuldeiser, looptijd, oorspronkelijk bedrag en actuele balans. Ze kunnen aan transacties en bewijsdocumenten worden gekoppeld. Een asset kan met `financed_by` aan de liability worden gekoppeld die de asset financiert.
-
-## Dossiers
-
-Dossiers (`cases`) groeperen een vrij gekozen, niet-lege classificatie, titel, beschrijving en optionele looptijd. De exacte statussen zijn `planned`, `active`, `completed` en `archived`. Een dossier kan met `relates_to` aan transacties, assets en liabilities worden gekoppeld; bewijsdocumenten wijzen met `evidence_for` naar het dossier. De gebruikersgerichte tijdlijn komt uit `domain_events` en is geen workflow.
-
-## Domeinrelaties
-
-`entity_relations` legt polymorfe relaties vast tussen cases, assets, liabilities, transacties en documenten. `relates_to` loopt van een case naar een transactie, asset of liability, of van een asset/liability naar een transactie. `evidence_for` loopt van een document naar een case, asset, transactie of liability. `financed_by` loopt van een asset naar een liability. PostgreSQL kan voor een type/id-paar geen normale foreign key naar meerdere mogelijke tabellen afdwingen; daarom controleert de repository het bestaan van beide objecten en blokkeren delete-operaties relaties waar nodig.
-
-## Domeingebeurtenissen
-
-`domain_events` is een automatisch bijgewerkte tijdlijnprojectie voor assets, liabilities en cases. Het is geen event-sourcingmodel, broker of technische auditlog. Mutaties en hun tijdlijnregel worden in dezelfde PostgreSQL-transactie opgeslagen. De API biedt alleen `GET /api/v1/assets/{id}/events`, `GET /api/v1/liabilities/{id}/events` en `GET /api/v1/cases/{id}/events`; gebeurtenissen kunnen niet rechtstreeks via de API worden aangemaakt, gewijzigd of verwijderd.
-
-## Eerste domeinen
-
-De initiële database-opbouw bevat:
-
-- huishoudens
-- rekeningen
-- hoofdcategorieen
-- subcategorieen
-- transacties
-
-SQLite bewaart dit standaard in `data/hohoho.db`. De belangrijkste tabellen zijn:
-
-- `accounts`: bankrekeningen met naam, IBAN, type, eigenaar en bankprofiel
-- `main_categories`: hoofdcategorieen zoals Wonen, Huishouden en Vervoer
-- `categories`: subcategorieen met hoofdcategorie, soort en doel
-- `transactions`: transacties met rekening, optionele categorie, datum, bedrag, tegenpartij en importreferentie
-
-De eerste hoofdcategorieen zijn: Inkomsten, Wonen, Huishouden, Medische kosten, Verzekeringen, Telecom, Vervoer, Educatie, Kleding, Vrije tijd en Overige uitgaven.
-
-Categorieen hebben twee aparte eigenschappen:
-
-- `kind`: boekhoudkundige richting, zoals `income`, `expense` of `transfer`
-- `purpose`: huishoudelijk doel, zoals `daily`, `reservation` of `investment`
-
-Daardoor blijven dagelijkse uitgaven, reserveringen en huishoudelijke investeringen vanaf het begin gescheiden zonder dat dit transacties of budgetten later ingewikkelder maakt. Investeringen zijn hier bijvoorbeeld woningverbetering, verduurzaming of duurzame aankopen, niet primair vermogensopbouw.
-
-## Bankimport
-
-De applicatie heeft een eerste import-preview voor CSV-bestanden van banken. Uploaden slaat nog niets op; het leest alleen transacties zodat het formaat gecontroleerd kan worden.
-
-Beschikbare profielen: `generic`, `ing`, `rabobank`, `abnamro`, `asn_sns_regiobank`, `sparda`, `triodos` en `ics`. ICS gebruikt het PDF-afschrift; de overige profielen gebruiken CSV.
-
-Testbestand:
-
-```text
-samples/bankimport/generic.csv
-```
-
-Meer details staan in `docs/bankimport.md`.
+Historische PostgreSQL-migraties en v2-modules worden in de vervolgstappen opgeruimd. Ze zijn geen migratielijn of opslagkeuze voor de actieve v3-applicatie.

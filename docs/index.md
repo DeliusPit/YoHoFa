@@ -1,53 +1,32 @@
-# HoHoHo Documentatie
+# HoHoHo-documentatie
 
-Deze directory bevat de ontwerp- en technische documentatie voor HoHoHo, de huishoudadministratie-applicatie.
+## Actieve v3-basis
 
-## Startpunten
+Stappen 1 en 2 en de handmatige transactieflow zijn gerealiseerd: negen lege SQLite-tabellen, schema-versiebeheer en beheer van financiële objecten, waarden, relaties en inkomsten/uitgaven via API en browser. Nieuwe databases hebben geen seeds; v3-data blijft na herstart behouden.
 
-- [Functioneel ontwerp](functional-design.md): beschrijft alle gebruikersfuncties, schermen, domeinen en gewenste werking.
-- [Technisch ontwerp](technical-design.md): beschrijft architectuur, lagen, stores, objectopslag, configuratie, migraties en betrouwbaarheid.
-- [Datamodel](data-model.md): beschrijft het totale relationele model, relaties, invarianten en compatibiliteitslagen.
-- [Datamodel v3 en migratieanalyse](data-model-v3.md): eenvoudige kern van negen tabellen voor financiële objecten, transacties, documenten, waarden, bankimport en relaties; één database per huishouden.
-- [Technische doelarchitectuur v3](technical-architecture-v3.md): browserapp met één Go-service, uitsluitend SQLite en Garage/S3, gedeployed via Docker Compose.
-- [SQLite-referentieschema v3](target-schema-v3.sql): SQL-definitie van het doelmodel; geen uitvoerbare upgrade van v2.
-- [API-overzicht](api-reference.md): beschrijft de HTTP API per functiegroep.
-- [AI bij bankimport](ai-bankimport.md): ontwerp voor AI-ondersteunde transactiecategorisatie.
-- [Bankimport](bankimport.md): bestaande importprofielen en gebruik.
-- [Opslagarchitectuur](storage-architecture.md): opslagprofielen, schema-aanpak en migratiepaden.
+- [Datamodel v3](data-model-v3.md): de negen domeintabellen en ontwerpregels.
+- [Technische architectuur v3](technical-architecture-v3.md): vaste SQLite/Garage-stack, gerealiseerde basis en vervolgstappen.
+- [API v3](api-v3.md): actieve object-, transactie-, waarde- en relatieroutes.
+- [Canoniek SQLite-schema](../internal/store/core_schema.sql): ingebed door de actieve store.
+- [README](../README.md): starten, Compose, configuratie en verificatie.
 
-## Applicatiefuncties
+Configureerbare bankimport, documenten/PDF-AI en backup/herstel worden in de volgende stappen aangesloten. Beheerde Garage/bootstrap volgt later; de huidige Compose gebruikt een bestaand endpoint.
 
-HoHoHo ondersteunt momenteel deze hoofdgebieden:
+## Historische v2-documentatie
 
-- Dashboard en financiële samenvatting.
-- Bankrekeningen.
-- Hoofd- en subcategorieen.
-- Banktransactie-import en duplicate-detectie.
-- Transactiebeheer, filteren, verbergen en categoriseren.
-- Rapportages per categorie en periode.
-- Documentbeheer met metadata, objectopslag en documentanalyse.
-- Bezittingen inclusief waarderingen, contracten, documenten, transacties en tijdlijn.
-- Schulden inclusief schuldeiser-normalisatie, documenten, transacties en tijdlijn.
-- Reserveringen voor toekomstige verplichtingen.
-- Dossiers voor administratieve contexten.
-- Generieke relaties tussen documenten, transacties, bezittingen, schulden, dossiers en reserveringen.
-- Domeingebeurtenissen als gebruikersgerichte tijdlijn.
-- Systeemconfiguratie voor database, objectopslag en lokale LLM.
-- Systeembackup en herstel met restic/rclone.
+Onderstaande documenten beschrijven de vervangen multi-backendapplicatie en tijdelijk behouden legacycode, niet de actieve v3-routes of opslagkeuzes:
 
-## Architectuur in het kort
+- [Functioneel ontwerp v2](functional-design.md).
+- [Technisch ontwerp v2](technical-design.md).
+- [Datamodel v2](data-model.md).
+- [API-overzicht v2](api-reference.md).
+- [Bankimport v2](bankimport.md).
+- [Opslagarchitectuur v2](storage-architecture.md).
+- [AI-bankimportvoorstel v2](ai-bankimport.md).
 
-- Backend: Go HTTP API vanuit `cmd/api`.
-- Applicatielogica: `internal/`.
-- Stores: PostgreSQL, SQLite en MySQL via `internal/store`.
-- Frontend: Vite met vanilla JavaScript in `web/`.
-- PostgreSQL-migraties: `migrations/`.
-- Objectopslag: filesystem of S3-compatible provider via `internal/objectstore`.
-- Productieruntime: Docker Compose met PostgreSQL en optionele S3-compatible objectopslag.
+## Ontwerpdiscipline
 
-## Documentatieregels
-
-- De relationele database blijft de bron van waarheid voor metadata, relaties en applicatiestatus.
-- Originele documenten blijven immutable objecten in filesystem/S3.
-- Nieuwe domeinfuncties moeten in PostgreSQL, SQLite en MySQL consistent blijven zolang die stores ondersteund worden.
-- UI-compatibiliteit is belangrijk: raw bank- en documentgegevens worden niet stilzwijgend overschreven.
+- Eén database/deployment is één huishouden.
+- SQLite is de enige structured-data-store; originele documenten staan in Garage/S3.
+- Financiële objecten zijn de classificatie. Geen extra domeintabellen zonder concrete behoefte die niet met de negen tabellen kan worden gerealiseerd.
+- Beschrijf gerealiseerde functies en plannen apart; nieuwe startup mag geen legacytabellen of seeds toevoegen.

@@ -1,6 +1,6 @@
 # HoHoHo v3 — eenvoudige browserapp met SQLite en Garage
 
-Status: **doelarchitectuur, nog niet geïmplementeerd**. Dit document beschrijft de technische vereenvoudiging naast het [kernmodel met negen tabellen](data-model-v3.md). Het vervangt voor v3 de keuze tussen meerdere databasebackends en opslagprofielen.
+Status: **v3-basis en handmatige transacties geïmplementeerd**. De actieve Go-service gebruikt SQLite en serveert object-/waarde-/relatiebeheer en inkomsten/uitgaven met objecttoewijzingen in de browser. Compose bouwt een klein app-image en gebruikt een bestaande Garage-configuratie. Beheerde Garage/bootstrap, bankimport, documentflows en backup/herstel volgen later. Dit document beschrijft de gerealiseerde basis en verdere technische richting naast het [kernmodel met negen tabellen](data-model-v3.md).
 
 **Uitvoeringsbesluit:** bestaande data mag vervallen. V3 start op `v3-simplification` met een nieuwe, lege SQLite-database en lege HoHoHo-documentopslag. Er is geen datamigrator, ID-mapping of migratiearchief nodig. Oude data verwijderen blijft een aparte uitvoeringsstap.
 
@@ -33,7 +33,7 @@ HoHoHo (één Go-service)
    └─ PDF-AI-client → bestaande externe PDF-AI-service
 ```
 
-De zelfstandige Compose-deployment bestaat uit twee langlopende services:
+De uiteindelijke zelfstandige Compose-deployment bestaat uit twee langlopende services. De huidige Compose-definitie bevat alleen HoHoHo en sluit aan op een bestaande Garage-installatie:
 
 - **HoHoHo:** één replica, bouw vanuit de repository-root, publiceert poort 8080 en mount een persistente datamap voor SQLite.
 - **Garage:** S3-endpoint op het interne Compose-netwerk, eigen persistente metadata- en objectopslag en eigen configuratie. S3/RPC/admin-poorten worden niet naar buiten gepubliceerd voor applicatiegebruik.
@@ -42,7 +42,7 @@ De bestaande externe PDF-AI-service wordt via `PDF_AI_URL` benaderd. De HoHoHo-s
 
 Compose-builds behouden de multi-stage aanpak: Node/Vite voor de frontendbuild, Go voor de binary, een klein runtime-image met CA-certificaten en uitsluitend benodigde runtimehulpmiddelen. De huidige `FROM postgres:18`, PostgreSQL-/MariaDB-clients en bijbehorende dumpcontroles vervallen in het doelimage. Backuphulpmiddelen blijven alleen aanwezig als de gekozen backupflow ze daadwerkelijk gebruikt.
 
-Doel voor starten: `docker compose up --build -d`. Dit is pas de nieuwe standalone deployment nadat de runtimewijzigingen zijn gerealiseerd; de huidige `compose.yml` start nog het bestaande model.
+Starten: `docker compose up --build -d`. De huidige `compose.yml` start de SQLite-kern op poort 8080, mount `data/v3` en bevat geen PostgreSQL-/MySQL-services. Garage zelf wordt nog niet door deze Compose-definitie gestart.
 
 ### Garage-initialisatie
 
@@ -52,7 +52,7 @@ Bij implementatie hoort daarom een gedocumenteerde, herhaalbare eenmalige bootst
 
 ## 3. SQLite als enige structured-data-store
 
-Het [SQLite-referentieschema](target-schema-v3.sql) bevat de negen domeintabellen. De eerdere PostgreSQL-notatie is vertaald zonder het logische model uit te breiden:
+Het [canonieke SQLite-schema](../internal/store/core_schema.sql) bevat de negen domeintabellen en wordt ingebed door `internal/store/core.go`. De eerdere PostgreSQL-notatie is vertaald zonder het logische model uit te breiden:
 
 | Aangeleverde PostgreSQL-notatie | SQLite |
 | --- | --- |
@@ -65,12 +65,12 @@ Het [SQLite-referentieschema](target-schema-v3.sql) bevat de negen domeintabelle
 
 ### Openen, concurrency en migraties
 
-- SQLite staat op een lokaal persistent volume, bijvoorbeeld `/app/data/hohoho.db`. De volledige map wordt gemount, zodat eventuele `-wal`- en `-shm`-bestanden op dezelfde opslag staan.
+- SQLite staat op een lokaal persistent volume: Compose gebruikt `/app/data/hohoho.db`, lokaal is de default `data/v3/hohoho.db`. De volledige map wordt gemount, zodat eventuele `-wal`- en `-shm`-bestanden op dezelfde opslag staan.
 - Eén Go-proces beheert het bestand; geen horizontale app-replicatie op hetzelfde bestand en geen gedeelde netwerkfilesystem-database.
 - Foreign keys worden **per verbinding** aangezet en getest. Alleen de PRAGMA in een los SQL-bestand is hiervoor niet genoeg.
 - Gebruik korte databasetransacties, een begrensde wachttijd voor locks en WAL-mode. Begin met één databaseverbinding, zoals de huidige SQLite-store, voor eenvoudig voorspelbaar schrijfgedrag.
 - Wacht niet op S3- of PDF-AI-calls terwijl een schrijftransactie open staat.
-- Eén versieerbare SQLite-migratielijn wordt de bron voor schema-evolutie. Een technische migratieregistratie, zoals `PRAGMA user_version`, kan de versie bijhouden zonder een tiende domeintabel toe te voegen.
+- Eén versieerbare SQLite-migratielijn is de bron voor schema-evolutie. `PRAGMA user_version` houdt momenteel versie 1 bij zonder een tiende domeintabel toe te voegen.
 - Nieuwe en bestaande databases worden door hetzelfde migratiepad voorbereid. De huidige PostgreSQL-reconciler en drie parallelle schema-implementaties vervallen na migratie.
 
 SQLite is de bron van waarheid voor alle gestructureerde domeingegevens, inclusief documenttekst, analyse, bronregels, waarden en relaties. Browseropslag is geen primaire database of backup.
@@ -95,6 +95,8 @@ Documentanalyse blijft beperkt achtergrondwerk in dezelfde Go-service. Het negen
 
 In v3 kiest de gebruiker geen databasebackend, objectbackend of opslagprofiel. SQLite en S3 staan vast. Eén duidelijke deploymentconfiguratie uit Compose/environment vervangt het huidige bewaren en omschakelen van alternatieve opslagconfiguraties.
 
+De actieve runtime leest alleen environment; `config/storage.json` wordt niet geopend. Compose leest de root-`.env` en tijdelijk daarna `config/.env` om bestaande credentials bereikbaar te houden. De laatste env-file heeft voorrang. De overgang naar uitsluitend de root-`.env` hoort bij de verdere deploymentopruiming.
+
 Benodigde operationele instellingen:
 
 | Instelling | Doel |
@@ -105,6 +107,7 @@ Benodigde operationele instellingen:
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY` | Server-side buckettoegang |
 | `S3_REGION`, `S3_PATH_STYLE`, `S3_USE_TLS` | Bestaand S3-clientcontract; Garage gebruikt path-style, TLS passend bij het endpoint |
 | `PDF_AI_URL` | Externe documentverwerking, zonder hardcoded LAN-adres |
+| `TRANSACTION_AI_URL`, `TRANSACTION_AI_MODEL` | OpenAI-compatible transactieclassificatie voor bankimport |
 | `AUTH_USERNAME`, `AUTH_PASSWORD` | Bestaande productieauthenticatie behouden |
 
 `HTTP_ADDR` en `WEB_DIR` kunnen vaste defaults in het app-image krijgen. `STORE_BACKEND`, `DATABASE_URL`, `MYSQL_*`, `OBJECT_BACKEND` en `STORAGE_PROFILE` verdwijnen als gebruikerskeuzes. De deployment gebruikt één bron voor instellingen; oude `config/storage.json`-waarden mogen nieuwe instellingen niet ongemerkt overschrijven. Secrets blijven buiten Git en buiten frontendresponses.
@@ -158,4 +161,8 @@ De technische omschakeling en nieuwe domeinfuncties krijgen afzonderlijke contro
 - Foreign keys, allocaties, waardehistorie, importherkomst en objectrelaties werken op SQLite.
 - Een backup/herstelproef levert dezelfde administratie en documentbytes op.
 
-Voor deze voorbereiding zijn alleen documentatie en het referentieschema aangepast. De bestaande `compose.yml`, Dockerfile en applicatie gebruiken nog de huidige architectuur.
+## 9. Verificatie van de gerealiseerde basis
+
+`go build ./...` en `go test ./...` controleren de v3-basis plus tijdelijk behouden legacycode. `scripts/check-local.sh` start de echte API op een geïsoleerde tijdelijke database, controleert objecten/waarden/relaties en herstart/persistentie. De frontend wordt met Vite gebouwd. Productie-image en HTTP-startup worden afzonderlijk gecontroleerd.
+
+De actieve `/healthz` meet SQLite; `/readyz` controleert ook S3. Ontbrekende/onbereikbare S3 maakt readiness 503, maar blokkeert de huidige objectbasis niet. Documentupload, analyse en herstel zijn nog niet beschikbaar als v3-routes.

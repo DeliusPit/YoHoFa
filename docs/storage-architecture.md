@@ -1,6 +1,6 @@
 # Opslagarchitectuur
 
-> **Huidige implementatie.** V3 krijgt één vaste opslagcombinatie: SQLite voor gestructureerde data en Garage/S3 voor documenten. Zie [Technische doelarchitectuur v3](technical-architecture-v3.md) voor het migratiepad. De onderstaande opslagprofielen beschrijven de bestaande runtime.
+> **Historische v2-opslagarchitectuur.** V3 gebruikt één vaste opslagcombinatie: SQLite voor gestructureerde data en Garage/S3 voor documenten. Zie [Technische architectuur v3](technical-architecture-v3.md). Onderstaande opslagprofielen worden niet meer door de actieve runtime gebruikt.
 
 Deze applicatie ondersteunt drie opslagprofielen:
 

@@ -1,0 +1,36 @@
+bank:
+  name: "Triodos Bank"
+
+source:
+  format: csv
+  delimiter: ","
+  encoding: utf-8
+  quote: '"'
+  header: false
+
+columns:
+  transaction_date: 0
+  account: 1
+  amount: 2
+  debit_credit: 3
+  counterparty: 4
+  counterparty_account: 5
+  transaction_code: 6
+  description: 7
+  balance: 8
+
+amount:
+  mode: debit_credit
+  debit_value: "Debet"
+  credit_value: "Credit"
+
+mapping:
+  transaction_date: transaction_date
+  amount_cents: amount
+  description: description
+  counterparty: counterparty
+
+formats:
+  transaction_date: "02-01-2006"
+  decimal_separator: ","
+  thousands_separator: "."
