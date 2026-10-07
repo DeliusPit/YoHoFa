@@ -1,97 +1,103 @@
-# HoHoHo v3
+# HoHoHo
 
-House Hold Hosting: huishoudadministratie rond financiële objecten, met uitsluitend SQLite voor data en Garage/S3 voor originele documenten. Eén deployment is één huishouden; de gebruiker werkt in een browser.
+HoHoHo is een huishoudadministratie voor een enkel huishouden. De applicatie brengt bezittingen, schulden, lasten, reserveringen, inkomsten, uitgaven, bankimporten en documenten samen in een browserinterface. Een installatie bevat precies een administratie: er zijn geen gebruikers-, huishouden- of tenanttabellen.
 
-## Huidige stap: de lege basis
+De applicatie bestaat uit een Go-service die zowel de API als de gebouwde webinterface serveert. SQLite bewaart alle gestructureerde gegevens. Originele documentbestanden staan in een S3-compatibele objectstore, normaal gesproken Garage. De browser ontvangt nooit S3-sleutels.
 
-Stappen 1 en 2 zijn gerealiseerd:
+## Wat de applicatie doet
 
-- Bestaande data hoeft niet behouden of geconverteerd te worden.
-- Startup maakt een nieuwe SQLite-database met precies negen lege domeintabellen, zonder seeds.
-- Onder **Balans & Planning** zijn financiële objecten (`asset`, `debt`, `expense`, `reserve`), waardehistorie en objectrelaties via de browser te beheren; dezelfde functies zijn via de API beschikbaar.
-- Balans & Planning heeft een submenu per objectsoort en vier aanmaakknoppen. De objecten staan in vier gelijke kaders: bezittingen linksboven, schulden linksonder, lasten rechtsboven en reserveringen rechtsonder. Het submenu brengt het betreffende kader in beeld; aanmaken/wijzigen opent het gedeelde formulier eronder.
-- Wanneer een financieel object is geselecteerd toont Balans & Planning ook de nieuwste gekoppelde transacties met bedrag en objecttoewijzing.
-- Onder **Configuratie** staat een v3-overzicht van SQLite, Garage/S3, applicatiestatus en het backup/recovery-blok uit de vorige versie. Garage/S3-instellingen kunnen daar worden opgeslagen; secrets worden niet teruggegeven aan de browser en wijzigingen gelden na een herstart. Databasekeuzes worden niet live gewisseld: v3 gebruikt de vaste SQLite/Garage-combinatie.
-- Onder **Applicatie Configuratie** staan twee AI-koppelingen: een PDF/OCR-AI URL voor documentverwerking en een Transactieclassificatie-AI URL voor automatische classificatie van banktransacties.
-- Backup en recovery gebruiken opnieuw restic/rclone. De runtime image bevat deze tools; backups omvatten SQLite, Garage/S3-objecten en configuratie. Recovery wordt gepland met bevestiging `HERSTEL` en uitgevoerd bij de volgende start.
-- **Bankimport Configuratie** beheert YAML-bestanden onder `config/banks/` zoals `abn.yaml`, `sparda.yaml` en `triodos.yaml`. Elk bestand beschrijft bronformaat, mapping naar `transaction_date`, `amount_cents`, `description` en `counterparty`, plus datum-/bedragformaten. Opslaan valideert het YAML-bestand en synchroniseert generiek naar `bank_import_profiles`; er is geen bankspecifieke Go-vertakking.
-- Het tabblad **Import** kan een bankconfiguratie selecteren, een CSV-export uploaden, een preview tonen en de genormaliseerde transacties opslaan. Ruwe CSV-regels worden per geïmporteerde transactie in `bank_import_rows` bewaard.
-- Het tabblad **Inkomsten & Uitgaven** bevat handmatige transacties: aanmaken, wijzigen en verwijderen, met datum, bedrag, omschrijving en tegenpartij. Bedragen kunnen over financiële objecten worden verdeeld; ongeclassificeerde en gedeeltelijk toegewezen transacties zijn toegestaan.
-- Transacties worden vanuit de browser verborgen in plaats van fysiek verwijderd. Onder **Toon** kunnen verborgen transacties apart worden bekeken en weer zichtbaar worden gemaakt. Bij categoriseren kan dezelfde categorisatie automatisch worden toegepast op zichtbare transacties met dezelfde tegenpartij die nog niet geclassificeerd zijn.
-- Het hoofdmenu staat in deze volgorde: **Dashboard**, **Balans & Planning**, **Inkomsten & Uitgaven**, **Documenten**, **Import**, **Configuratie**. Documenten, Import en Configuratie zijn voorbereid met een melding dat hun functies nog volgen. Navigatie, browsertitel en directe hashlinks volgen het actieve tabblad; wisselen tussen tabs bewaart de ingevulde formulieren.
-- Het **Dashboard** gebruikt de afgeronde panelen en jaar-/maandknoppen uit de oude vormgeving. Links staan balans en planning op de laatste dag van de geselecteerde periode, rechts inkomsten, uitgaven, saldo en aantallen binnen die periode. Waarderingen worden historisch gelezen; reserveringen en lasten staan apart van de netto balans.
-- Het transactieoverzicht toont inkomsten, uitgaven en saldo van de selectie, plus paginering en een filter op richting. Totalen tellen elke transactie één keer, onafhankelijk van het aantal koppelingen.
-- SQLite gebruikt foreign keys, WAL, een lock-wachttijd en `PRAGMA user_version` voor schema-evolutie.
-- Eén Go-service serveert frontend en API. Opslagprofielen en `config/storage.json` worden door deze runtime niet gelezen.
+Financiële objecten vormen de kern van de administratie. Elk object is een bezit, schuld, last of reservering. Waarden zijn historisch: de meest recente waardering op of voor de gekozen peildatum bepaalt de actuele waarde. Transacties kunnen aan een of meer objecten worden toegewezen, ook gedeeltelijk.
 
-Bankimportconfiguratie, CSV-preview/import met deduplicatie, backup/herstel en handmatige transacties zijn aangesloten. `cmd/api` gebruikt uitsluitend de SQLite/S3-kern.
+Het dashboard toont de balans op een gekozen periode-einde en de inkomsten, uitgaven en het saldo binnen die periode. Reserveringen en lasten staan bewust apart van het vermogen.
 
-## Docker Compose
+CSV-bankbestanden worden met configureerbare YAML-profielen gelezen. De import bewaart bronregels, maakt genormaliseerde transacties en slaat herhaalde regels per importprofiel over. AI-classificatie is een afzonderlijke, optionele stap: zij koppelt nog niet-geclassificeerde transacties aan bestaande financiële objecten.
 
-Maak lokale configuratie vanuit `.env.example` en vul authenticatie en Garage-toegang in. Commit de ingevulde bestanden niet.
+Documenten worden naar S3/Garage geupload terwijl SQLite metadata, tekst, analyse en objectkoppelingen bewaart. Een optionele externe PDF-AI-service kan tekst, vertaling en analyse leveren.
 
-```sh
-cp .env.example .env
-docker compose up --build -d
-```
+De ingebouwde backupfunctie maakt consistente snapshots van SQLite, documentobjecten en runtimeconfiguratie met restic en rclone. Backups hebben planning en retentie, worden gecontroleerd met `restic check` en krijgen een niet-destructieve restore-proef voordat zij als geslaagd gelden.
 
-- Browser: `http://localhost:8080`.
-- Productie vereist `AUTH_USERNAME` en `AUTH_PASSWORD`.
-- De database staat op de host in `data/v3/hohoho.db`, gemount als `/app/data/hohoho.db`.
-- De huidige Compose-definitie bevat alleen de applicatieservice en sluit aan op een bestaande Garage-installatie via `S3_*`. Een beheerde Garage-service/bootstrap volgt in de deploymentstap.
-- `config/.env` wordt tijdelijk nog als tweede env-file ingelezen voor bestaande installatiecredentials; die waarden gaan vóór `.env`. Gebruik voor nieuwe inrichting de root-`.env` en voorkom dubbele instellingen.
-- `/healthz` controleert de SQLite-kern; `/readyz` controleert ook de S3-bucket. Zonder Garage blijft objectbeheer bruikbaar, maar is `/readyz` niet gereed.
+## Vereisten
 
-Een oude database wordt niet automatisch gewist of omgezet. Als een expliciet `DATABASE_PATH` naar een oud schema wijst, weigert startup dat bestand. De nieuwe default en Compose-volume gebruiken een afzonderlijke v3-map. Oude databasebestanden of HoHoHo-documentobjecten verwijderen is een aparte uitvoeringsstap.
+- Docker Engine met Docker Compose.
+- Een bereikbare S3-compatibele objectstore. Garage is de beoogde provider.
+- In productie: een reverse proxy of load balancer die TLS afhandelt voor poort 8080.
 
-## Lokaal ontwikkelen
+De Compose-definitie start alleen HoHoHo. Garage, een reverse proxy en een eventuele PDF-AI-service zijn externe voorzieningen. Gebruik één app-proces per SQLite-bestand; plaats het bestand niet op een gedeeld netwerkfilesystem.
 
-Vereisten: Go 1.25+ en Node.js 24+.
+## Installatie
+
+1. Maak de runtimeconfiguratie vanuit het voorbeeldbestand.
+
+   ```sh
+   cp .env.example .env
+   ```
+
+2. Vul in `.env` ten minste de productieauthenticatie en S3-instellingen in. Gebruik voor een bestaande Garage-installatie de endpoint-, bucket- en toegangssleutels daarvan.
+
+   Vereiste instellingen voor productie:
+
+   ```text
+   AUTH_USERNAME=
+   AUTH_PASSWORD=
+   S3_ENDPOINT=
+   S3_ACCESS_KEY=
+   S3_SECRET_KEY=
+   S3_BUCKET=hohoho-v3-documents
+   ```
+
+   Voeg waar nodig `S3_REGION`, `S3_PATH_STYLE`, `S3_USE_TLS`, `PDF_AI_URL`, `TRANSACTION_AI_URL` en `TRANSACTION_AI_MODEL` toe. Garage gebruikt doorgaans path-style S3-toegang. Commit `.env` en `config/.env` nooit.
+
+3. Start de applicatie.
+
+   ```sh
+   docker compose up --build -d
+   ```
+
+4. Open `http://localhost:8080` en meld aan met de ingestelde Basic-authenticatie.
+
+De SQLite-database staat standaard op de host in `data/v3/hohoho.db` en is in de container beschikbaar als `/app/data/hohoho.db`. Bewaar de volledige directory `data/v3`, inclusief eventuele WAL- en SHM-bestanden. Een nieuwe database bevat geen voorbeeldgegevens.
+
+## Beschikbaarheid en beheer
+
+- `GET /healthz` controleert of SQLite beschikbaar is.
+- `GET /readyz` controleert SQLite en de geconfigureerde S3-bucket.
+- De configuratiepagina toont de status van SQLite, S3, PDF-AI, transactie-AI en backup.
+- De backupsectie configureert de resticrepository, planning en retentie. Herstel vereist de bevestiging `HERSTEL` en wordt bij de volgende start uitgevoerd.
+
+Maak vóór een upgrade een geslaagde backup. De SQLite-migraties gebruiken `PRAGMA user_version`; de huidige applicatie kan een database met een nieuwere schema-versie niet openen. Oude v2-databases worden niet geconverteerd of automatisch verwijderd.
+
+## Ontwikkeling en verificatie
+
+Voor lokaal ontwikkelen zijn Go 1.25+ en Node.js 24+ nodig.
 
 ```sh
 ./scripts/dev-api.sh
 ```
 
-Dit start de API met `data/v3/hohoho.db`. In een tweede terminal, vanuit `web/`:
+Start voor frontendontwikkeling in een tweede terminal:
 
 ```sh
+cd web
 npm ci
 npm run dev
 ```
 
-Vite proxy't de API naar poort 8080. Voor frontendassets die de Go-service zelf serveert: voer `npm run build` uit vanuit `web/`.
-
-## Basis-API
-
-```sh
-curl http://localhost:8080/api/v1/financial-objects
-curl -H 'Content-Type: application/json' \
-  -d '{"objectType":"asset","name":"Woning Sögel"}' \
-  http://localhost:8080/api/v1/financial-objects
-```
-
-Zie [API v3](docs/api-v3.md) voor objectbeheer, waarden, relaties en foutafhandeling. De voorbeelden hierboven gaan uit van lokale ontwikkeling zonder authenticatie.
-
-## Verificatie
+De belangrijkste controles zijn:
 
 ```sh
 go build ./...
 go test ./...
 ./scripts/check-local.sh
+docker build -t hohoho-check .
 ```
 
-De lokale check gebruikt een tijdelijk databasebestand, controleert CRUD en herstart/persistentie en ruimt alleen die testgegevens op. De tests bewaken onder meer negen lege tabellen, foreign keys op nieuwe verbindingen, JSON-validatie, actuele waarden en het weigeren van oude/nieuwere schema's.
+`check-local.sh` gebruikt een tijdelijke SQLite-database en controleert onder andere objecten, waarden, transacties, bankimportdeduplicatie, dashboard en persistentie na herstart. De scriptcheck gebruikt geen echte S3-, AI- of backupcredentials.
 
-## Structuur en documentatie
+## Ontwerp en API
 
-- `cmd/api`: enige actieve backend-entrypoint.
-- `internal/config/runtime.go`: vaste v3-runtimeconfiguratie.
-- `internal/store/core.go` en `core_schema.sql`: actieve SQLite-kern en canoniek schema.
-- `internal/httpserver/core.go`: actieve v3-routes.
-- `web/src/main.js` en `core.css`: browserinterface voor de basis.
-- `internal/objectstore/s3.go`: S3-client voor Garage.
-- [Datamodel v3](docs/data-model-v3.md).
-- [Technische architectuur en vervolgstappen](docs/technical-architecture-v3.md).
-- [Documentatie-index](docs/index.md).
+- [Datamodel v3](docs/data-model-v3.md): de negen domeintabellen en ontwerpregels.
+- [Technische architectuur v3](docs/technical-architecture-v3.md): runtime, opslag, backup en deployment.
+- [API v3](docs/api-v3.md): actieve HTTP-routes en invoerregels.
+- [Documentatie-index](docs/index.md): actieve en historische documentatie.
 
-De actieve applicatie heeft geen PostgreSQL- of MySQL-migratielijn; SQLite-schema-upgrades verlopen via `PRAGMA user_version`.
+Historische v2-documenten zijn alleen naslagwerk. De actieve runtime gebruikt uitsluitend de v3 SQLite/S3-architectuur.
