@@ -79,8 +79,12 @@ CREATE TABLE bank_import_rows (
     id             INTEGER PRIMARY KEY,
     profile_id     INTEGER NOT NULL REFERENCES bank_import_profiles(id) ON DELETE CASCADE,
     raw_data       TEXT NOT NULL CHECK (json_valid(raw_data)),
+    fingerprint    TEXT NOT NULL,
     transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL
 );
+
+CREATE UNIQUE INDEX bank_import_rows_profile_fingerprint_uidx
+    ON bank_import_rows(profile_id, fingerprint);
 
 CREATE TABLE object_relations (
     source_object_id INTEGER NOT NULL REFERENCES financial_objects(id) ON DELETE CASCADE,

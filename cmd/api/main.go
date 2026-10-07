@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -32,8 +31,7 @@ func run(logger *slog.Logger) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	backupCfg := backupConfigFromRuntime(cfg)
-	if recovered, err := systembackup.RunPendingRecovery(ctx, backupCfg, logger); err != nil {
+	if recovered, err := systembackup.RunPendingRecovery(ctx, cfg, logger); err != nil {
 		return err
 	} else if recovered {
 		logger.Info("Recovery uitgevoerd voor start")
@@ -56,7 +54,7 @@ func run(logger *slog.Logger) error {
 		}
 		objectStorage.Swap(client)
 	}
-	backupService, err := systembackup.New(ctx, backupCfg, logger)
+	backupService, err := systembackup.New(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -96,24 +94,5 @@ func run(logger *slog.Logger) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
-	}
-}
-
-func backupConfigFromRuntime(cfg config.Runtime) config.Config {
-	configPath := cfg.ConfigPath
-	if !filepath.IsAbs(configPath) {
-		configPath, _ = filepath.Abs(configPath)
-	}
-	backupWorkRoot := cfg.BackupWorkRoot
-	if !filepath.IsAbs(backupWorkRoot) {
-		backupWorkRoot, _ = filepath.Abs(backupWorkRoot)
-	}
-	return config.Config{
-		AppEnv: cfg.AppEnv, HTTPAddr: cfg.HTTPAddr, CORSOrigin: cfg.CORSOrigin, WebDir: cfg.WebDir,
-		AuthUsername: cfg.AuthUsername, AuthPassword: cfg.AuthPassword,
-		StoreBackend: "sqlite", DatabasePath: cfg.DatabasePath,
-		ObjectBackend: "s3", S3Endpoint: cfg.S3Endpoint, S3AccessKey: cfg.S3AccessKey, S3SecretKey: cfg.S3SecretKey,
-		S3Bucket: cfg.S3Bucket, S3UseTLS: cfg.S3UseTLS, S3Region: cfg.S3Region, S3PathStyle: cfg.S3PathStyle, S3CreateBucket: cfg.S3CreateBucket,
-		PDFAIURL: cfg.PDFAIURL, ConfigPath: configPath, BackupWorkRoot: backupWorkRoot,
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"hohoho/internal/systembackup"
 )
 
-func registerSystemBackupRoutes(mux *http.ServeMux, deps Dependencies) {
+func registerSystemBackupRoutes(mux *http.ServeMux, deps CoreDependencies) {
 	mux.HandleFunc("GET /api/v1/system/backup", func(w http.ResponseWriter, r *http.Request) {
 		if deps.SystemBackup == nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "backup_unavailable"})

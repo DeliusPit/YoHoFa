@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -73,6 +74,41 @@ func TestCoreEmptySchemaAndReopen(t *testing.T) {
 	objects, err := s.FinancialObjects(ctx, "")
 	if err != nil || len(objects) != 1 || objects[0].ID != object.ID {
 		t.Fatalf("reopen must preserve data without seeding: %v, %v", objects, err)
+	}
+}
+
+func TestCoreMigratesBankImportFingerprints(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "v5.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacySchema := strings.Replace(coreSchema, "    fingerprint    TEXT NOT NULL,\n", "", 1)
+	legacySchema = strings.Replace(legacySchema, "CREATE UNIQUE INDEX bank_import_rows_profile_fingerprint_uidx\n    ON bank_import_rows(profile_id, fingerprint);\n\n", "", 1)
+	if _, err := db.Exec(legacySchema + "PRAGMA user_version = 5"); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO bank_import_profiles (name, source_format, configuration) VALUES ('Test', 'csv', '{}'); INSERT INTO bank_import_rows (profile_id, raw_data) VALUES (1, '{}')`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenCore(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var version int
+	var fingerprint string
+	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil || version != CoreSchemaVersion {
+		t.Fatalf("schema version = %d, %v", version, err)
+	}
+	if err := s.db.QueryRowContext(ctx, "SELECT fingerprint FROM bank_import_rows WHERE id = 1").Scan(&fingerprint); err != nil || fingerprint != "legacy-1" {
+		t.Fatalf("migrated fingerprint = %q, %v", fingerprint, err)
 	}
 }
 

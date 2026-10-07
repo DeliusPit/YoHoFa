@@ -220,14 +220,14 @@ De kern heeft geen parent-hiërarchie, attributen-JSON, object-kind of lifecycle
 
 ## 4. Implementatie en vervolgstappen
 
-Gerealiseerd: `config.RuntimeFromEnv`, `store.OpenCore`, `httpserver.NewCore` en de nieuwe browserinterface. Schema-versie 1 wordt transactioneel aangemaakt zonder seeddata. De actieve startup opent alleen deze store en registreert geen v2-routes. De oude store/config/HTTP/import/backupbestanden blijven tijdelijk compileren voor de overgang, maar zijn niet actief.
+Gerealiseerd: `config.RuntimeFromEnv`, `store.OpenCore`, `httpserver.NewCore` en de nieuwe browserinterface. Schema-versie 7 wordt transactioneel aangemaakt zonder seeddata. De actieve startup opent alleen deze store en registreert geen v2-routes. Bankimportregels hebben een unieke fingerprint per profiel zodat herhaalde CSV-uploads geen dubbele transacties maken.
 
 | Onderdeel | Nodige verandering |
 | --- | --- |
 | Database | Een nieuwe, lege SQLite-database met de negen kerntabellen initialiseren; geen bestaande tabellen converteren |
 | Store-laag | Financiële objecten, transacties, documenten, waarden, importprofielen/-regels en de drie soorten koppelingen ondersteunen |
 | Classificatie | `transactions.category_id` vervangen door `transaction_financial_objects` |
-| Bankimport | Bankspecifieke hard-coded profielen en branches vervangen door configuratie; ruwe regels bewaren en aan canonieke transacties koppelen; deduplicatie expliciet afhandelen |
+| Bankimport | Geconfigureerde CSV-profielen, ruwe regels, canonieke transacties en fingerprint-gebaseerde deduplicatie per profiel |
 | Waarden en relaties | Waardehistorie en object-objectrelaties generiek opslaan; actuele waarden op meest recente datum lezen |
 | Documentopslag | S3/Garage gebruiken voor nieuwe uploads; metadata en koppelingen in SQLite |
 | PDF-AI | Response expliciet mappen naar `extracted_text`, `translated_text`, `analysis_json` |
@@ -237,7 +237,7 @@ Gerealiseerd: `config.RuntimeFromEnv`, `store.OpenCore`, `httpserver.NewCore` en
 | Opslag | Eén SQLite-implementatie en Garage/S3-documentstore; database-/objectbackendkeuzes en opslagprofielen vervangen |
 | Herstel en checks | Backup/herstel, startup en bestaande verificatiescripts op het vereenvoudigde schema afstemmen |
 
-De actieve basis zit in `internal/store/core.go`, `core_schema.sql`, `internal/httpserver/core.go`, `internal/config/runtime.go` en `web/src/main.js`. De PostgreSQL-map `migrations/` en oude schema-initialisatie behoren niet tot de actieve v3-migratielijn.
+De actieve basis zit in `internal/store/core.go`, `core_schema.sql`, `internal/httpserver/core.go`, `internal/config/runtime.go` en `web/src/main.js`. SQLite-schema-upgrades verlopen via `PRAGMA user_version`.
 
 ## 5. Nieuwe, lege administratie
 

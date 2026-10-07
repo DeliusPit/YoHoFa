@@ -128,13 +128,14 @@ De browser laat een positief bedrag invoeren en bepaalt het teken uit Inkomst/Ui
 | `PUT /api/v1/bank-configs/{slug}` | YAML-bankconfiguratie opslaan en synchroniseren als importprofiel |
 | `DELETE /api/v1/bank-configs/{slug}` | YAML-bankconfiguratie verwijderen |
 | `POST /api/v1/bank-imports/preview` | CSV lokaal parsen via gekozen bankconfiguratie |
-| `POST /api/v1/bank-imports` | CSV importeren en transacties via `TRANSACTION_AI_URL` aan objecten koppelen |
+| `POST /api/v1/bank-imports` | CSV importeren als niet-geclassificeerde transacties |
 
-Preview en import gebruiken `multipart/form-data` met `bankConfig` en `file`. Definitieve import stuurt de genormaliseerde regels plus bestaande financiële objecten naar de transactie-AI. Het AI-contract staat in `docs/ai-bankimport.md`.
+Preview en import gebruiken `multipart/form-data` met `bankConfig` en `file`. Bestanden zijn maximaal 8 MiB; een definitieve import bevat maximaal 5.000 transactieregels. De response bevat `total`, `imported` en `skipped`. Dezelfde genormaliseerde datum, bedrag, omschrijving en tegenpartij binnen hetzelfde importprofiel wordt als duplicaat overgeslagen, ook bij een tweede upload van hetzelfde bestand. Classificatie is een afzonderlijke actie via `POST /api/v1/transactions/classify-ai`; het AI-contract staat in `docs/ai-bankimport.md`.
 
 ## Fouten en invoer
 
 - 400: ongeldige JSON, onbekende velden, meerdere JSON-waarden, ongeldig ID, type, naam, datum of ontbrekend bedrag.
+- 413: document of bankimportbestand is groter dan de endpointlimiet.
 - 401: ontbrekende of onjuiste authenticatie.
 - 404: record of API-route bestaat niet. Oude rekening-, categorie-, dossier- en configuratieroutes retourneren JSON-404, geen frontend-HTML.
 - 409: dubbele relatie of een verwijdering die door foreign keys wordt geblokkeerd. Verwijder eerst waarden/koppelingen voordat een financieel object definitief wordt verwijderd.

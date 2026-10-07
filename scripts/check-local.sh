@@ -19,6 +19,8 @@ export DATABASE_PATH="$work/hohoho.db"
 unset AUTH_USERNAME AUTH_PASSWORD AUTH_USERNAME_BASE64 AUTH_PASSWORD_BASE64
 unset S3_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY
 base=http://127.0.0.1:18080
+bank_csv="$work/sparda.csv"
+printf '%s\n' 'Buchungstag;Betrag;Verwendungszweck;Auftraggeber/Empfänger' '03.10.2026;-42,50;Boodschappen;Supermarkt' >"$bank_csv"
 
 start() {
   "$work/hohoho-api" &
@@ -41,6 +43,10 @@ curl -fsS -H 'Content-Type: application/json' -d '{"valueDate":"2026-10-01","val
 curl -fsS -H 'Content-Type: application/json' -d '{"sourceObjectId":2,"targetObjectId":1,"relationType":"finances"}' "$base/api/v1/object-relations" >/dev/null
 curl -fsS -H 'Content-Type: application/json' -d '{"transactionDate":"2026-10-01","amountCents":-100000,"description":"Hypotheekbetaling","allocations":[{"financialObjectId":2,"amountCents":-100000}]}' "$base/api/v1/transactions" >/dev/null
 curl -fsS -H 'Content-Type: application/json' -d '{"transactionDate":"2026-10-02","amountCents":250000,"description":"Pensioen"}' "$base/api/v1/transactions" >/dev/null
+first_import=$(curl -fsS -F 'bankConfig=sparda' -F "file=@$bank_csv" "$base/api/v1/bank-imports")
+case "$first_import" in *'"imported":1'*'"skipped":0'*) ;; *) exit 1 ;; esac
+second_import=$(curl -fsS -F 'bankConfig=sparda' -F "file=@$bank_csv" "$base/api/v1/bank-imports")
+case "$second_import" in *'"imported":0'*'"skipped":1'*) ;; *) exit 1 ;; esac
 curl -fsS "$base/api/v1/financial-objects/1/values" >/dev/null
 curl -fsS "$base/api/v1/financial-objects/1/relations" >/dev/null
 test "$(curl -s -o /dev/null -w '%{http_code}' "$base/api/v1/accounts")" = "404"
@@ -52,7 +58,7 @@ summary=$(curl -fsS "$base/api/v1/summary")
 case "$summary" in *'"financialObjects":2'*) ;; *) exit 1 ;; esac
 case "$summary" in *'"objectValues":1'*) ;; *) exit 1 ;; esac
 case "$summary" in *'"objectRelations":1'*) ;; *) exit 1 ;; esac
-case "$summary" in *'"transactions":2'*) ;; *) exit 1 ;; esac
+case "$summary" in *'"transactions":3'*) ;; *) exit 1 ;; esac
 transactions=$(curl -fsS "$base/api/v1/transactions")
 case "$transactions" in *'"balanceCents":150000'*) ;; *) exit 1 ;; esac
 dashboard=$(curl -fsS "$base/api/v1/dashboard?year=2026&month=10")

@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 
 	"hohoho/internal/bankconfig"
 )
@@ -18,6 +20,7 @@ type BankImportProfile struct {
 type CoreBankImportResult struct {
 	ProfileID int64 `json:"profileId"`
 	Imported  int   `json:"imported"`
+	Skipped   int   `json:"skipped"`
 	Total     int   `json:"total"`
 }
 
@@ -70,8 +73,26 @@ func (s *Core) ImportBankTransactions(ctx context.Context, profile BankImportPro
 	for _, row := range rows {
 		amount := row.Parsed.Transaction.AmountCents
 		input := SaveCoreTransaction{TransactionDate: row.Parsed.Transaction.TransactionDate, AmountCents: &amount, Description: row.Parsed.Transaction.Description, Counterparty: row.Parsed.Transaction.Counterparty}
-		if _, err := normalizeCoreTransaction(input); err != nil {
+		input, err := normalizeCoreTransaction(input)
+		if err != nil {
 			return result, err
+		}
+		raw, err := json.Marshal(row.Parsed.Raw)
+		if err != nil {
+			return result, err
+		}
+		fingerprint := bankImportFingerprint(input.TransactionDate, amount, input.Description, input.Counterparty)
+		stored, err := tx.ExecContext(ctx, "INSERT INTO bank_import_rows (profile_id, raw_data, fingerprint) VALUES (?, ?, ?) ON CONFLICT(profile_id, fingerprint) DO NOTHING", profile.ID, string(raw), fingerprint)
+		if err != nil {
+			return result, coreStoreError(err)
+		}
+		affected, err := stored.RowsAffected()
+		if err != nil {
+			return result, err
+		}
+		if affected == 0 {
+			result.Skipped++
+			continue
 		}
 		inserted, err := tx.ExecContext(ctx, "INSERT INTO transactions (transaction_date, amount_cents, description, counterparty, status) VALUES (?, ?, ?, ?, 'I')", input.TransactionDate, amount, input.Description, input.Counterparty)
 		if err != nil {
@@ -81,14 +102,16 @@ func (s *Core) ImportBankTransactions(ctx context.Context, profile BankImportPro
 		if err != nil {
 			return result, err
 		}
-		raw, err := json.Marshal(row.Parsed.Raw)
-		if err != nil {
-			return result, err
-		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO bank_import_rows (profile_id, raw_data, transaction_id) VALUES (?, ?, ?)", profile.ID, string(raw), transactionID); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE bank_import_rows SET transaction_id = ? WHERE profile_id = ? AND fingerprint = ?", transactionID, profile.ID, fingerprint); err != nil {
 			return result, coreStoreError(err)
 		}
 		result.Imported++
 	}
 	return result, tx.Commit()
+}
+
+func bankImportFingerprint(date string, amount int64, description, counterparty string) string {
+	data := fmt.Sprintf("%s\x00%d\x00%s\x00%s", date, amount, description, counterparty)
+	sum := sha256.Sum256([]byte(data))
+	return fmt.Sprintf("%x", sum[:])
 }

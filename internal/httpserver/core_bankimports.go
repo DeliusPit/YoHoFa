@@ -24,6 +24,11 @@ const transactionAIBatchSize = 25
 const transactionAITimeout = 10 * time.Minute
 const transactionAIWarmupTimeout = 5 * time.Minute
 
+const (
+	bankImportMaxBytes = 8 << 20
+	bankImportMaxRows  = 5000
+)
+
 type coreBankImportPreview struct {
 	BankConfig string                 `json:"bankConfig"`
 	BankName   string                 `json:"bankName"`
@@ -106,8 +111,12 @@ func registerCoreBankImportRoutes(mux *http.ServeMux, deps CoreDependencies) {
 		writeJSON(w, http.StatusOK, coreBankImportPreview{BankConfig: item.Slug, BankName: item.Bank.Name, Rows: rows, Total: len(rows)})
 	})
 	mux.HandleFunc("POST /api/v1/bank-imports", func(w http.ResponseWriter, r *http.Request) {
-		item, rows, ok := parseBankImportUpload(w, r, deps, 0)
+		item, rows, ok := parseBankImportUpload(w, r, deps, bankImportMaxRows+1)
 		if !ok {
+			return
+		}
+		if len(rows) > bankImportMaxRows {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "Een bankimport mag maximaal 5000 transactieregels bevatten"})
 			return
 		}
 		configuration, err := bankconfig.ConfigurationJSON(item)
@@ -613,7 +622,13 @@ func transactionAIPrompt(categories []bankImportAICategory, transactions []store
 }
 
 func parseBankImportUpload(w http.ResponseWriter, r *http.Request, deps CoreDependencies, limit int) (bankconfig.Config, []bankconfig.ParsedRow, bool) {
-	if err := r.ParseMultipartForm(16 << 20); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, bankImportMaxBytes)
+	if err := r.ParseMultipartForm(bankImportMaxBytes); err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "Een bankimportbestand mag maximaal 8 MiB zijn"})
+			return bankconfig.Config{}, nil, false
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Upload kon niet worden gelezen"})
 		return bankconfig.Config{}, nil, false
 	}

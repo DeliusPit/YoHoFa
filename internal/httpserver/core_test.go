@@ -214,6 +214,10 @@ func TestCoreBankImportPreviewAndImport(t *testing.T) {
 	if text := response.Body.String(); !strings.Contains(text, `"imported":2`) {
 		t.Fatalf("unexpected import result: %s", text)
 	}
+	response = coreMultipartRequest(t, handler, "/api/v1/bank-imports", map[string]string{"bankConfig": "sparda"}, "sparda.csv", csv, 201)
+	if text := response.Body.String(); !strings.Contains(text, `"imported":0`) || !strings.Contains(text, `"skipped":2`) {
+		t.Fatalf("duplicate import was not skipped: %s", text)
+	}
 	response = coreRequest(t, handler, "GET", "/api/v1/transactions?limit=10", "", 200)
 	if text := response.Body.String(); !strings.Contains(text, `"total":2`) || !strings.Contains(text, "ALDI NORD") || !strings.Contains(text, "Werkgever") || !strings.Contains(text, `"status":"I"`) {
 		t.Fatalf("transactions not imported: %s", text)

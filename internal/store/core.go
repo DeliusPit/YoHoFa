@@ -17,7 +17,7 @@ import (
 	"modernc.org/sqlite"
 )
 
-const CoreSchemaVersion = 5
+const CoreSchemaVersion = 7
 
 //go:embed core_schema.sql
 var coreSchema string
@@ -203,6 +203,22 @@ func (s *Core) initialize(ctx context.Context) error {
 				return err
 			}
 		}
+		if version < 6 {
+			for _, statement := range []string{
+				"ALTER TABLE bank_import_rows ADD COLUMN fingerprint TEXT NOT NULL DEFAULT ''",
+				"UPDATE bank_import_rows SET fingerprint = 'legacy-' || id WHERE fingerprint = ''",
+				"CREATE UNIQUE INDEX IF NOT EXISTS bank_import_rows_profile_fingerprint_uidx ON bank_import_rows(profile_id, fingerprint)",
+			} {
+				if _, err := tx.ExecContext(ctx, statement); err != nil {
+					return err
+				}
+			}
+		}
+		if version < 7 {
+			if err := backfillBankImportFingerprints(ctx, tx); err != nil {
+				return err
+			}
+		}
 		if version != CoreSchemaVersion {
 			if _, err := tx.ExecContext(ctx, "PRAGMA user_version = "+strconv.Itoa(CoreSchemaVersion)); err != nil {
 				return err
@@ -210,6 +226,52 @@ func (s *Core) initialize(ctx context.Context) error {
 		}
 	}
 	return tx.Commit()
+}
+
+func backfillBankImportFingerprints(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `SELECT r.id, r.profile_id, r.fingerprint, t.transaction_date, t.amount_cents, COALESCE(t.description, ''), COALESCE(t.counterparty, '')
+		FROM bank_import_rows r JOIN transactions t ON t.id = r.transaction_id ORDER BY r.id`)
+	if err != nil {
+		return err
+	}
+	type legacyRow struct {
+		id          int64
+		profileID   int64
+		fingerprint string
+	}
+	used := map[string]bool{}
+	legacy := []legacyRow{}
+	for rows.Next() {
+		var id, profileID, amount int64
+		var fingerprint, date, description, counterparty string
+		if err := rows.Scan(&id, &profileID, &fingerprint, &date, &amount, &description, &counterparty); err != nil {
+			rows.Close()
+			return err
+		}
+		value := bankImportFingerprint(date, amount, description, counterparty)
+		key := strconv.FormatInt(profileID, 10) + ":" + value
+		if strings.HasPrefix(fingerprint, "legacy-") {
+			legacy = append(legacy, legacyRow{id: id, profileID: profileID, fingerprint: value})
+			continue
+		}
+		used[key] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, row := range legacy {
+		key := strconv.FormatInt(row.profileID, 10) + ":" + row.fingerprint
+		if used[key] {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE bank_import_rows SET fingerprint = ? WHERE id = ?", row.fingerprint, row.id); err != nil {
+			return err
+		}
+		used[key] = true
+	}
+	return nil
 }
 
 func tableColumns(ctx context.Context, tx *sql.Tx, table string) (map[string]bool, error) {

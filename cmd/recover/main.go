@@ -18,11 +18,11 @@ func main() {
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	configuration, err := config.NewManager(config.FromEnv())
-	if err != nil {
+	configuration := config.RuntimeFromEnv()
+	if err := configuration.Validate(); err != nil {
 		fatal(err)
 	}
-	service, err := systembackup.New(context.Background(), configuration.Effective(), logger)
+	service, err := systembackup.New(context.Background(), configuration, logger)
 	if err != nil {
 		fatal(err)
 	}

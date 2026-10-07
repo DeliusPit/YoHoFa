@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +19,6 @@ import (
 
 	"hohoho/internal/config"
 
-	mysqlDriver "github.com/go-sql-driver/mysql"
 	_ "modernc.org/sqlite"
 )
 
@@ -146,7 +143,7 @@ type settings struct {
 
 type Service struct {
 	mu           sync.Mutex
-	cfg          config.Config
+	cfg          config.Runtime
 	path         string
 	workRoot     string
 	settings     settings
@@ -161,13 +158,23 @@ type Service struct {
 	lastSchedule string
 }
 
-func New(ctx context.Context, cfg config.Config, logger *slog.Logger) (*Service, error) {
+func New(ctx context.Context, cfg config.Runtime, logger *slog.Logger) (*Service, error) {
+	configPath, err := filepath.Abs(cfg.ConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ConfigPath = configPath
 	workRoot := cfg.BackupWorkRoot
 	if workRoot == "" {
 		workRoot = "/app/data/backup-work"
 	}
+	workRoot, err = filepath.Abs(workRoot)
+	if err != nil {
+		return nil, err
+	}
+	cfg.BackupWorkRoot = workRoot
 	service := &Service{cfg: cfg, path: filepath.Join(filepath.Dir(cfg.ConfigPath), "backup.json"), workRoot: workRoot, ctx: ctx, logger: logger}
-	if !filepath.IsAbs(workRoot) || workRoot == string(filepath.Separator) || (cfg.ObjectBackend == "filesystem" && pathsOverlap(workRoot, cfg.ObjectFilesystemRoot)) {
+	if workRoot == string(filepath.Separator) {
 		return nil, fmt.Errorf("invalid backup work directory")
 	}
 	data, err := os.ReadFile(service.path)
@@ -507,9 +514,9 @@ func (s *Service) destinationOverlapsSource(value settings) bool {
 	remote, repositoryPath, _ := strings.Cut(value.Repository, ":")
 	remoteType := rcloneRemoteValue(value.RcloneConfig, remote, "type")
 	if remoteType == "local" && filepath.IsAbs(repositoryPath) {
-		return pathsOverlap(repositoryPath, s.workRoot) || pathsOverlap(repositoryPath, filepath.Dir(s.cfg.ConfigPath)) || (s.cfg.ObjectBackend == "filesystem" && pathsOverlap(repositoryPath, s.cfg.ObjectFilesystemRoot))
+		return pathsOverlap(repositoryPath, s.workRoot) || pathsOverlap(repositoryPath, filepath.Dir(s.cfg.ConfigPath))
 	}
-	if s.cfg.ObjectBackend != "s3" || remoteType != "s3" {
+	if remoteType != "s3" {
 		return false
 	}
 	endpoint := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(rcloneRemoteValue(value.RcloneConfig, remote, "endpoint"), "https://"), "http://"), "/")
@@ -623,7 +630,7 @@ func (s *Service) runtimeFiles(current settings, includeSource bool) (runtimeFil
 	}
 	cleanup := func() { _ = os.RemoveAll(dir) }
 	rcloneConfig := current.RcloneConfig
-	if includeSource && s.cfg.ObjectBackend == "s3" {
+	if includeSource {
 		rcloneConfig += sourceRemote(s.cfg)
 	}
 	rclonePath := filepath.Join(dir, "rclone.conf")
@@ -673,7 +680,7 @@ func (s *Service) run(ctx context.Context, current settings) (string, error) {
 	if err := s.backupConfiguration(stage); err != nil {
 		return "", fmt.Errorf("configuration: %w", err)
 	}
-	manifest := map[string]any{"version": 2, "createdAt": time.Now().UTC().Format(time.RFC3339), "databaseBackend": s.cfg.StoreBackend, "objectBackend": s.cfg.ObjectBackend, "policy": current.Policy}
+	manifest := map[string]any{"version": 2, "createdAt": time.Now().UTC().Format(time.RFC3339), "databaseBackend": "sqlite", "objectBackend": "s3", "policy": current.Policy}
 	data, _ := json.MarshalIndent(manifest, "", "  ")
 	if err := os.WriteFile(filepath.Join(stage, "manifest.json"), data, 0o600); err != nil {
 		return "", fmt.Errorf("manifest: %w", err)
@@ -700,7 +707,7 @@ func (s *Service) run(ctx context.Context, current settings) (string, error) {
 	return snapshot, nil
 }
 
-func RunPendingRecovery(ctx context.Context, cfg config.Config, logger *slog.Logger) (bool, error) {
+func RunPendingRecovery(ctx context.Context, cfg config.Runtime, logger *slog.Logger) (bool, error) {
 	service, err := New(ctx, cfg, logger)
 	if err != nil {
 		return false, err
@@ -760,7 +767,7 @@ func (s *Service) RecoverNow(ctx context.Context, snapshotID string, safetyBacku
 	if err != nil {
 		return fmt.Errorf("manifest: %w", err)
 	}
-	if manifest.DatabaseBackend != s.cfg.StoreBackend || manifest.ObjectBackend != s.cfg.ObjectBackend {
+	if manifest.DatabaseBackend != "sqlite" || manifest.ObjectBackend != "s3" {
 		return fmt.Errorf("manifest: storage backend mismatch")
 	}
 	if err := s.restoreObjects(ctx, runtime.env, payload); err != nil {
@@ -808,7 +815,7 @@ func recoveryPayload(root string) (string, backupManifest, error) {
 		return "", backupManifest{}, err
 	}
 	var manifest backupManifest
-	if json.Unmarshal(data, &manifest) != nil || (manifest.Version != 1 && manifest.Version != 2) || manifest.DatabaseBackend == "" || manifest.ObjectBackend == "" {
+	if json.Unmarshal(data, &manifest) != nil || manifest.Version != 2 || manifest.DatabaseBackend == "" || manifest.ObjectBackend == "" {
 		return "", backupManifest{}, fmt.Errorf("invalid manifest")
 	}
 	return payload, manifest, nil
@@ -816,66 +823,12 @@ func recoveryPayload(root string) (string, backupManifest, error) {
 
 func (s *Service) restoreDatabase(ctx context.Context, env []string, payload string) error {
 	source := filepath.Join(payload, "database")
-	switch s.cfg.StoreBackend {
-	case "sqlite":
-		return replaceFile(filepath.Join(source, "hohoho.db"), s.cfg.DatabasePath)
-	case "postgres":
-		parsed, err := url.Parse(s.cfg.PostgresURL)
-		if err != nil {
-			return err
-		}
-		password, _ := parsed.User.Password()
-		port := parsed.Port()
-		if port == "" {
-			port = "5432"
-		}
-		args := []string{"--clean", "--if-exists", "--single-transaction", "--no-owner", "--no-privileges", "--host=" + parsed.Hostname(), "--port=" + port, "--username=" + parsed.User.Username(), "--dbname=" + strings.TrimPrefix(parsed.Path, "/"), filepath.Join(source, "hohoho.pgdump")}
-		return commandRun(ctx, append(env, "PGPASSWORD="+password, "PGSSLMODE="+parsed.Query().Get("sslmode")), nil, "pg_restore", args...)
-	case "mysql":
-		parsed, err := mysqlDriver.ParseDSN(s.cfg.MySQLDSN)
-		if err != nil {
-			return err
-		}
-		defaults, err := s.mysqlDefaultsFile(source, parsed)
-		if err != nil {
-			return err
-		}
-		defer os.Remove(defaults)
-		input, err := os.Open(filepath.Join(source, "hohoho.sql"))
-		if err != nil {
-			return err
-		}
-		defer input.Close()
-		return commandRunInput(ctx, env, input, "mariadb", "--defaults-extra-file="+defaults, parsed.DBName)
-	default:
-		return fmt.Errorf("unsupported backend")
-	}
-}
-
-func (s *Service) mysqlDefaultsFile(directory string, parsed *mysqlDriver.Config) (string, error) {
-	host, port := parsed.Addr, "3306"
-	if parsed.Net == "tcp" {
-		if parsedHost, parsedPort, err := net.SplitHostPort(parsed.Addr); err == nil {
-			host, port = parsedHost, parsedPort
-		}
-	}
-	path := filepath.Join(directory, ".mysql-recovery.cnf")
-	content := fmt.Sprintf("[client]\nuser=%s\npassword=%s\nhost=%s\nport=%s\nprotocol=tcp\n", mysqlOption(parsed.User), mysqlOption(parsed.Passwd), mysqlOption(host), mysqlOption(port))
-	if s.cfg.MySQLTLSMode != "disabled" {
-		content += "ssl=true\n"
-	}
-	return path, os.WriteFile(path, []byte(content), 0o600)
+	return replaceFile(filepath.Join(source, "hohoho.db"), s.cfg.DatabasePath)
 }
 
 func (s *Service) restoreObjects(ctx context.Context, env []string, payload string) error {
 	source := filepath.Join(payload, "objects")
-	if s.cfg.ObjectBackend == "s3" {
-		return commandRun(ctx, env, nil, "rclone", "sync", "--delete-during", source, sourceRemoteName+":"+s.cfg.S3Bucket)
-	}
-	if s.cfg.ObjectBackend == "filesystem" {
-		return replaceTree(source, s.cfg.ObjectFilesystemRoot)
-	}
-	return fmt.Errorf("unsupported backend")
+	return commandRun(ctx, env, nil, "rclone", "sync", "--delete-during", source, sourceRemoteName+":"+s.cfg.S3Bucket)
 }
 
 func (s *Service) restoreConfiguration(payload string) error {
@@ -890,63 +843,15 @@ func (s *Service) restoreConfiguration(payload string) error {
 
 func (s *Service) backupDatabase(ctx context.Context, env []string, stage string) error {
 	destination := filepath.Join(stage, "database")
-	switch s.cfg.StoreBackend {
-	case "sqlite":
-		db, err := sql.Open("sqlite", s.cfg.DatabasePath)
-		if err != nil {
-			return err
-		}
-		defer db.Close()
-		path := filepath.Join(destination, "hohoho.db")
-		escaped := strings.ReplaceAll(path, "'", "''")
-		_, err = db.ExecContext(ctx, "vacuum into '"+escaped+"'")
+	db, err := sql.Open("sqlite", s.cfg.DatabasePath)
+	if err != nil {
 		return err
-	case "postgres":
-		parsed, err := url.Parse(s.cfg.PostgresURL)
-		if err != nil {
-			return err
-		}
-		password, _ := parsed.User.Password()
-		port := parsed.Port()
-		if port == "" {
-			port = "5432"
-		}
-		args := []string{"--format=custom", "--no-owner", "--no-privileges", "--file=" + filepath.Join(destination, "hohoho.pgdump"), "--host=" + parsed.Hostname(), "--port=" + port, "--username=" + parsed.User.Username(), "--dbname=" + strings.TrimPrefix(parsed.Path, "/")}
-		return commandRun(ctx, append(env, "PGPASSWORD="+password, "PGSSLMODE="+parsed.Query().Get("sslmode")), nil, "pg_dump", args...)
-	case "mysql":
-		parsed, err := mysqlDriver.ParseDSN(s.cfg.MySQLDSN)
-		if err != nil {
-			return err
-		}
-		defaults := filepath.Join(destination, "mysql.cnf")
-		host, port := parsed.Addr, "3306"
-		if parsed.Net == "tcp" {
-			if parsedHost, parsedPort, splitErr := net.SplitHostPort(parsed.Addr); splitErr == nil {
-				host, port = parsedHost, parsedPort
-			}
-		}
-		content := fmt.Sprintf("[client]\nuser=%s\npassword=%s\nhost=%s\nport=%s\nprotocol=tcp\n", mysqlOption(parsed.User), mysqlOption(parsed.Passwd), mysqlOption(host), mysqlOption(port))
-		if s.cfg.MySQLTLSMode != "disabled" {
-			content += "ssl=true\n"
-		}
-		if err := os.WriteFile(defaults, []byte(content), 0o600); err != nil {
-			return err
-		}
-		defer os.Remove(defaults)
-		file, err := os.OpenFile(filepath.Join(destination, "hohoho.sql"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-		args := []string{"--defaults-extra-file=" + defaults, "--single-transaction", "--quick", "--skip-lock-tables", "--routines", "--events", "--triggers", "--hex-blob", parsed.DBName}
-		return commandRun(ctx, env, file, "mariadb-dump", args...)
-	default:
-		return fmt.Errorf("unsupported backend")
 	}
-}
-
-func mysqlOption(value string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`).Replace(value) + `"`
+	defer db.Close()
+	path := filepath.Join(destination, "hohoho.db")
+	escaped := strings.ReplaceAll(path, "'", "''")
+	_, err = db.ExecContext(ctx, "vacuum into '"+escaped+"'")
+	return err
 }
 
 func (s *Service) backupObjects(ctx context.Context, env []string, stage string) error {
@@ -954,13 +859,7 @@ func (s *Service) backupObjects(ctx context.Context, env []string, stage string)
 	if err := os.MkdirAll(destination, 0o700); err != nil {
 		return err
 	}
-	if s.cfg.ObjectBackend == "s3" {
-		return commandRun(ctx, env, nil, "rclone", "copy", sourceRemoteName+":"+s.cfg.S3Bucket, destination)
-	}
-	if s.cfg.ObjectBackend == "filesystem" {
-		return copyTree(s.cfg.ObjectFilesystemRoot, destination)
-	}
-	return fmt.Errorf("unsupported backend")
+	return commandRun(ctx, env, nil, "rclone", "copy", sourceRemoteName+":"+s.cfg.S3Bucket, destination)
 }
 
 func (s *Service) backupConfiguration(stage string) error {
@@ -999,7 +898,7 @@ func (s *Service) validateSnapshot(ctx context.Context, env []string, snapshot s
 		return err
 	}
 	payload, manifest, err := recoveryPayload(drill)
-	if err != nil || manifest.DatabaseBackend != s.cfg.StoreBackend || manifest.ObjectBackend != s.cfg.ObjectBackend {
+	if err != nil || manifest.DatabaseBackend != "sqlite" || manifest.ObjectBackend != "s3" {
 		if err != nil {
 			return err
 		}
@@ -1020,35 +919,12 @@ func (s *Service) validateSnapshot(ctx context.Context, env []string, snapshot s
 	return nil
 }
 
-func sourceRemote(cfg config.Config) string {
+func sourceRemote(cfg config.Runtime) string {
 	scheme := "http"
 	if cfg.S3UseTLS {
 		scheme = "https"
 	}
 	return fmt.Sprintf("\n[%s]\ntype = s3\nprovider = Other\naccess_key_id = %s\nsecret_access_key = %s\nendpoint = %s://%s\nregion = %s\nforce_path_style = %t\n", sourceRemoteName, cfg.S3AccessKey, cfg.S3SecretKey, scheme, cfg.S3Endpoint, cfg.S3Region, cfg.S3PathStyle)
-}
-
-func copyTree(source, destination string) error {
-	if pathsOverlap(source, destination) {
-		return fmt.Errorf("source and destination overlap")
-	}
-	return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		relative, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(destination, relative)
-		if info.IsDir() {
-			return os.MkdirAll(target, 0o700)
-		}
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-		return copyFile(path, target)
-	})
 }
 
 func copyFile(source, destination string) error {
@@ -1087,38 +963,6 @@ func replaceFile(source, destination string) error {
 	return os.Rename(temporaryPath, destination)
 }
 
-func replaceTree(source, destination string) error {
-	parent := filepath.Dir(destination)
-	if err := os.MkdirAll(parent, 0o700); err != nil {
-		return err
-	}
-	temporary, err := os.MkdirTemp(parent, ".recovery-objects-")
-	if err != nil {
-		return err
-	}
-	defer os.RemoveAll(temporary)
-	if err := copyTree(source, temporary); err != nil {
-		return err
-	}
-	previous := destination + ".before-recovery"
-	if err := os.RemoveAll(previous); err != nil {
-		return err
-	}
-	hadDestination := true
-	if err := os.Rename(destination, previous); errors.Is(err, os.ErrNotExist) {
-		hadDestination = false
-	} else if err != nil {
-		return err
-	}
-	if err := os.Rename(temporary, destination); err != nil {
-		if hadDestination {
-			_ = os.Rename(previous, destination)
-		}
-		return err
-	}
-	return os.RemoveAll(previous)
-}
-
 func commandOutput(ctx context.Context, env []string, name string, args ...string) ([]byte, error) {
 	command := exec.CommandContext(ctx, name, args...)
 	command.Env = env
@@ -1136,18 +980,6 @@ func commandRun(ctx context.Context, env []string, stdout io.Writer, name string
 	command := exec.CommandContext(ctx, name, args...)
 	command.Env = env
 	command.Stdout = stdout
-	var stderr bytes.Buffer
-	command.Stderr = &stderr
-	if err := command.Run(); err != nil {
-		return commandError{code: classifyCommandError(name, stderr.String()), detail: strings.TrimSpace(stderr.String())}
-	}
-	return nil
-}
-
-func commandRunInput(ctx context.Context, env []string, stdin io.Reader, name string, args ...string) error {
-	command := exec.CommandContext(ctx, name, args...)
-	command.Env = env
-	command.Stdin = stdin
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {

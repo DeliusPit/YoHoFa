@@ -3,7 +3,6 @@ package config
 import "testing"
 
 func TestRuntimeIgnoresLegacyStorageSettings(t *testing.T) {
-	clearStorageEnv(t)
 	t.Setenv("STORE_BACKEND", "postgres")
 	t.Setenv("DATABASE_BACKEND", "mysql")
 	t.Setenv("CONFIG_PATH", "old-storage.json")

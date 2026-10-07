@@ -48,7 +48,7 @@ func NewCore(deps CoreDependencies) http.Handler {
 	registerCoreConfigurationRoutes(mux, deps)
 	registerCoreBankConfigRoutes(mux, deps)
 	registerCoreBankImportRoutes(mux, deps)
-	registerSystemBackupRoutes(mux, Dependencies{SystemBackup: deps.SystemBackup})
+	registerSystemBackupRoutes(mux, deps)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := deps.Store.Ping(r.Context()); err != nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unhealthy"})

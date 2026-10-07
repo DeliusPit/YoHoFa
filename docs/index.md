@@ -1,16 +1,16 @@
 # HoHoHo-documentatie
 
-## Actieve v3-basis
+## Actieve v3
 
-Stappen 1 en 2 en de handmatige transactieflow zijn gerealiseerd: negen lege SQLite-tabellen, schema-versiebeheer en beheer van financiële objecten, waarden, relaties en inkomsten/uitgaven via API en browser. Nieuwe databases hebben geen seeds; v3-data blijft na herstart behouden.
+De actieve runtime bevat de negen SQLite-tabellen, schema-versiebeheer, beheer van financiële objecten, waarden, relaties, inkomsten/uitgaven, configureerbare CSV-bankimport, S3-documenten/PDF-AI en backup/herstel. Nieuwe databases hebben geen seeds; v3-data blijft na herstart behouden.
 
 - [Datamodel v3](data-model-v3.md): de negen domeintabellen en ontwerpregels.
 - [Technische architectuur v3](technical-architecture-v3.md): vaste SQLite/Garage-stack, gerealiseerde basis en vervolgstappen.
-- [API v3](api-v3.md): actieve object-, transactie-, waarde- en relatieroutes.
+- [API v3](api-v3.md): actieve object-, transactie-, document-, import- en backuproutes.
 - [Canoniek SQLite-schema](../internal/store/core_schema.sql): ingebed door de actieve store.
 - [README](../README.md): starten, Compose, configuratie en verificatie.
 
-Configureerbare bankimport, documenten/PDF-AI en backup/herstel worden in de volgende stappen aangesloten. Beheerde Garage/bootstrap volgt later; de huidige Compose gebruikt een bestaand endpoint.
+Bankimport slaat dubbele genormaliseerde regels per importprofiel over en begrenst uploads. Beheerde Garage/bootstrap volgt later; de huidige Compose gebruikt een bestaand endpoint.
 
 ## Historische v2-documentatie
 

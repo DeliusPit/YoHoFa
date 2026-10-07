@@ -24,7 +24,7 @@ Stappen 1 en 2 zijn gerealiseerd:
 - SQLite gebruikt foreign keys, WAL, een lock-wachttijd en `PRAGMA user_version` voor schema-evolutie.
 - Eén Go-service serveert frontend en API. Opslagprofielen en `config/storage.json` worden door deze runtime niet gelezen.
 
-Bankimportconfiguratie, CSV-preview/import, backup/herstel en handmatige transacties zijn aangesloten. De volgende bankimportstap is deduplicatie en verdere controle/afhandeling van geïmporteerde regels. Oude v2-code en tests staan tijdelijk nog in de repository; `cmd/api` gebruikt uitsluitend de nieuwe kern.
+Bankimportconfiguratie, CSV-preview/import met deduplicatie, backup/herstel en handmatige transacties zijn aangesloten. `cmd/api` gebruikt uitsluitend de SQLite/S3-kern.
 
 ## Docker Compose
 
@@ -94,4 +94,4 @@ De lokale check gebruikt een tijdelijk databasebestand, controleert CRUD en hers
 - [Technische architectuur en vervolgstappen](docs/technical-architecture-v3.md).
 - [Documentatie-index](docs/index.md).
 
-Historische PostgreSQL-migraties en v2-modules worden in de vervolgstappen opgeruimd. Ze zijn geen migratielijn of opslagkeuze voor de actieve v3-applicatie.
+De actieve applicatie heeft geen PostgreSQL- of MySQL-migratielijn; SQLite-schema-upgrades verlopen via `PRAGMA user_version`.

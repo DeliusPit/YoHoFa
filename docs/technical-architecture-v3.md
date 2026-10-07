@@ -169,6 +169,6 @@ De technische omschakeling en nieuwe domeinfuncties krijgen afzonderlijke contro
 
 ## 9. Verificatie van de gerealiseerde basis
 
-`go build ./...` en `go test ./...` controleren de v3-basis plus tijdelijk behouden legacycode. `scripts/check-local.sh` start de echte API op een geïsoleerde tijdelijke database, controleert objecten/waarden/relaties en herstart/persistentie. De frontend wordt met Vite gebouwd. Productie-image en HTTP-startup worden afzonderlijk gecontroleerd.
+`go build ./...` en `go test ./...` controleren de v3-runtime. `scripts/check-local.sh` start de echte API op een geïsoleerde tijdelijke database, controleert objecten/waarden/relaties en herstart/persistentie. De frontend wordt met Vite gebouwd. Productie-image en HTTP-startup worden afzonderlijk gecontroleerd.
 
 De actieve `/healthz` meet SQLite; `/readyz` controleert ook S3. Ontbrekende/onbereikbare S3 maakt readiness 503, maar blokkeert de huidige objectbasis niet. Documentupload, analyse en herstel zijn nog niet beschikbaar als v3-routes.

@@ -2,12 +2,12 @@
 
 Actueel voor de v3-basis:
 
-- `check-local.sh`: start de v3-API met een tijdelijke lege SQLite-database, controleert objecten/waarden/relaties, handmatige transacties en herstart/persistentie.
+- `check-local.sh`: start de v3-API met een tijdelijke lege SQLite-database, controleert objecten/waarden/relaties, transacties, dashboard en persistentie na een herstart. Het gebruikt bewust geen Garage, externe AI of backuprepository.
 - `check-garage-s3.sh`: controleert een live S3-compatible/Garage-configuratie via de objectstore-client.
 - `dev-api.sh`: start de API lokaal voor ontwikkeling.
 - `build.sh`: bouwt lokale Go/frontend artifacts wanneer Go en Node lokaal beschikbaar zijn.
 
-`check-runtime.sh` en `check-storage-parity.sh` beschrijven nog v2-routes/backends. Ze worden in de vervolgstappen aangepast of opgeruimd; gebruik ze niet als v3-acceptatiecheck.
+De scripts controleren uitsluitend de actieve SQLite/S3-runtime; v2-runtime- en multi-backendcontroles zijn verwijderd.
 
 Gebruik voor de actuele centrale deployment:
 

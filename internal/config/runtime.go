@@ -1,10 +1,12 @@
 package config
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 // Runtime is the fixed SQLite/S3 configuration used by cmd/api in v3.
@@ -211,4 +213,48 @@ func applyRuntimeEnv(cfg *Runtime) {
 	if value := os.Getenv("TRANSACTION_AI_MODEL"); value != "" {
 		cfg.TransactionAIModel = value
 	}
+}
+
+// Environment helpers live with Runtime so it remains independent of legacy
+// configuration when config.go is eventually removed.
+func authEnv(plainKey string, base64Key string) string {
+	if value := os.Getenv(plainKey); value != "" {
+		return value
+	}
+	encoded := os.Getenv(base64Key)
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return ""
+	}
+	return string(decoded)
+}
+
+func env(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func envFallback(key, legacyKey, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return env(legacyKey, fallback)
+}
+
+func boolEnv(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	return value == "true"
+}
+
+func intEnv(key string, fallback int) int {
+	value, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || value == 0 {
+		return fallback
+	}
+	return value
 }
