@@ -19,9 +19,9 @@ get_env() {
 
 random_value() {
   if command_exists openssl; then
-    openssl rand -hex 24
+    openssl rand -hex 32
   else
-    od -An -N24 -tx1 /dev/urandom | tr -d ' \n'
+    od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
   fi
 }
 
