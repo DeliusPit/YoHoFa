@@ -18,7 +18,7 @@ func basicAuth(username string, password string, next http.Handler) http.Handler
 		usernameMatches := subtle.ConstantTimeCompare([]byte(providedUsername), []byte(username)) == 1
 		passwordMatches := subtle.ConstantTimeCompare([]byte(providedPassword), []byte(password)) == 1
 		if !ok || !usernameMatches || !passwordMatches {
-			w.Header().Set("WWW-Authenticate", `Basic realm="HoHoHo", charset="UTF-8"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="YoHoFa", charset="UTF-8"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}

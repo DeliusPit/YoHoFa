@@ -21,7 +21,13 @@ func TestCoreDashboardAPI(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &item); err != nil || item.Transactions.Count != 2 || item.Transactions.BalanceCents != 1658 {
 		t.Fatalf("whole-year dashboard: %s, %v", response.Body.String(), err)
 	}
+	response = coreRequest(t, handler, "GET", "/api/v1/budget?year=2026&month=10", "", 200)
+	var budget store.CoreBudget
+	if err := json.Unmarshal(response.Body.Bytes(), &budget); err != nil || budget.Year != 2026 || budget.Month != 10 {
+		t.Fatalf("budget response: %s, %v", response.Body.String(), err)
+	}
 	for _, query := range []string{"year=0", "year=-1", "year=10000", "year=abc", "month=-1", "month=13", "month=1.5"} {
 		coreRequest(t, handler, "GET", "/api/v1/dashboard?"+query, "", 400)
+		coreRequest(t, handler, "GET", "/api/v1/budget?"+query, "", 400)
 	}
 }

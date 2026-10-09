@@ -252,9 +252,12 @@ func TestCoreBankImportUsesSavedAIConfigurationWithoutRestart(t *testing.T) {
 			return
 		}
 		var input struct {
-			Model string `json:"model"`
+			Model          string `json:"model"`
+			ResponseFormat *struct {
+				Type string `json:"type"`
+			} `json:"response_format"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.Model != "saved-model" {
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.Model != "saved-model" || input.ResponseFormat == nil || input.ResponseFormat.Type != "json_object" {
 			t.Fatalf("unexpected AI request: %#v err=%v", input, err)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": `{"transactions":[{"row_index":1,"category_id":"1","confidence":0.99}]}`}}}})
@@ -286,13 +289,17 @@ func TestCoreBankImportWarmsUpLlamaSwapModel(t *testing.T) {
 			return
 		}
 		var input struct {
-			Model     string `json:"model"`
-			MaxTokens int    `json:"max_tokens"`
+			Model          string          `json:"model"`
+			MaxTokens      int             `json:"max_tokens"`
+			ResponseFormat json.RawMessage `json:"response_format"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.Model != "target-model" {
 			t.Fatalf("unexpected AI request: %#v err=%v", input, err)
 		}
 		if input.MaxTokens == 1 {
+			if input.ResponseFormat != nil {
+				t.Fatalf("warmup must not set response_format: %s", input.ResponseFormat)
+			}
 			warmups++
 			writeJSON(w, http.StatusOK, map[string]any{"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": `ok`}}}})
 			return
@@ -314,8 +321,8 @@ func TestCoreBankImportWarmsUpLlamaSwapModel(t *testing.T) {
 }
 
 func TestTransactionAIRunningHelpers(t *testing.T) {
-	got, err := llamaSwapRunningURL("http://192.168.178.215:8081/v1/chat/completions")
-	if err != nil || got != "http://192.168.178.215:8081/running" {
+	got, err := llamaSwapRunningURL("http://ai.example.local:8081/v1/chat/completions")
+	if err != nil || got != "http://ai.example.local:8081/running" {
 		t.Fatalf("unexpected running url: %q err=%v", got, err)
 	}
 	for _, input := range [][]byte{[]byte(`"model-a"`), []byte(`{"model":"model-a"}`), []byte(`{"current_model":"model-a"}`), []byte(`{"running":[{"model":"model-a","state":"ready"}]}`), []byte(`model-a`)} {

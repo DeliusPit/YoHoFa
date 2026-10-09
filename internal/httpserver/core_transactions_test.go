@@ -123,3 +123,35 @@ func TestCoreTransactionAppliesCategorizationToMatchingCounterparty(t *testing.T
 		t.Fatalf("matching counterparty was not categorized with target amount: %s, %v", response.Body.String(), err)
 	}
 }
+
+func TestCoreTransactionBulkClassification(t *testing.T) {
+	handler := coreTestHandler(t, config.Runtime{})
+	groceries := coreRequest(t, handler, "POST", "/api/v1/financial-objects", `{"objectType":"expense","name":"Boodschappen"}`, 201)
+	maintenance := coreRequest(t, handler, "POST", "/api/v1/financial-objects", `{"objectType":"expense","name":"Onderhoud"}`, 201)
+	var oldObject, newObject store.FinancialObject
+	if err := json.Unmarshal(groceries.Body.Bytes(), &oldObject); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(maintenance.Body.Bytes(), &newObject); err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]int64, 0, 2)
+	for _, description := range []string{"Baudi januari", "Baudi februari"} {
+		response := coreRequest(t, handler, "POST", "/api/v1/transactions", `{"transactionDate":"2026-01-10","amountCents":-1000,"description":"`+description+`","allocations":[{"financialObjectId":`+strconv.FormatInt(oldObject.ID, 10)+`,"amountCents":-1000}]}`, 201)
+		var transaction store.CoreTransaction
+		if err := json.Unmarshal(response.Body.Bytes(), &transaction); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, transaction.ID)
+	}
+	body := `{"transactionIds":[` + strconv.FormatInt(ids[0], 10) + `,` + strconv.FormatInt(ids[1], 10) + `],"financialObjectId":` + strconv.FormatInt(newObject.ID, 10) + `}`
+	coreRequest(t, handler, "POST", "/api/v1/transactions/bulk-classify", body, 204)
+	for _, id := range ids {
+		response := coreRequest(t, handler, "GET", "/api/v1/transactions/"+strconv.FormatInt(id, 10), "", 200)
+		var transaction store.CoreTransaction
+		if err := json.Unmarshal(response.Body.Bytes(), &transaction); err != nil || transaction.Status != "U" || len(transaction.Allocations) != 1 || transaction.Allocations[0].FinancialObjectID != newObject.ID || transaction.Allocations[0].AmountCents == nil || *transaction.Allocations[0].AmountCents != -1000 {
+			t.Fatalf("bulk classification failed: %s, %v", response.Body.String(), err)
+		}
+	}
+	coreRequest(t, handler, "POST", "/api/v1/transactions/bulk-classify", `{"transactionIds":[],"financialObjectId":`+strconv.FormatInt(newObject.ID, 10)+`}`, 400)
+}

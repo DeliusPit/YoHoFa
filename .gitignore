@@ -9,8 +9,13 @@ web/dist/
 *.db-shm
 *.db-wal
 data/
+.install/
+config/garage/
 config/*
 !config/.gitkeep
 !config/.env.example
+!config/ai-docs.yaml
 !config/banks/
 !config/banks/*.yaml
+!config/translations/
+!config/translations/*.json

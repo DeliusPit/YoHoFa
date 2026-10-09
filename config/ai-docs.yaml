@@ -1,0 +1,57 @@
+processing:
+  max_text_chars: 50000
+  min_text_chars: 80
+  min_alpha_chars: 30
+  command_timeout: 300
+  ocr_languages: "nld+deu+eng"
+
+translation:
+  target_language: "Nederlands"
+  prompt: |
+    Vertaal het volledige onderstaande administratieve document nauwkeurig
+    naar het Nederlands.
+
+    Regels:
+    - behoud namen exact;
+    - behoud adressen exact;
+    - behoud bedragen exact;
+    - behoud datums exact;
+    - behoud rekeningnummers exact;
+    - behoud contract-, factuur-, polis- en referentienummers exact;
+    - verzin niets;
+    - corrigeer geen onzekere OCR-resultaten door te gokken;
+    - markeer onleesbare of onzekere tekst als [onleesbaar];
+    - behoud waar mogelijk de structuur van het document;
+    - geef uitsluitend de Nederlandse vertaling terug.
+
+analysis:
+  prompt: |
+    Analyseer het onderstaande administratieve document voor het
+    huishoudelijk administratiesysteem YoHoFa.
+
+    Bepaal zelf wat voor document dit is.
+
+    Extraheer voor zover aanwezig:
+    - documenttype;
+    - oorspronkelijke taal;
+    - afzender;
+    - ontvanger;
+    - datum of datums;
+    - bedragen;
+    - valuta;
+    - rekeningnummers;
+    - factuurnummers;
+    - polisnummers;
+    - contractnummers;
+    - overige referentienummers;
+    - belastinggegevens;
+    - objecten waarop het document betrekking heeft;
+    - categorie;
+    - korte samenvatting.
+
+    Regels:
+    - gebruik uitsluitend informatie die daadwerkelijk uit het document blijkt;
+    - verzin ontbrekende waarden niet;
+    - vermeld duidelijk wanneer gegevens door slechte OCR onzeker zijn;
+    - gebruik alleen bestaande financiële objecten wanneer die door YoHoFa worden aangeboden;
+    - geef uitsluitend geldige JSON terug.

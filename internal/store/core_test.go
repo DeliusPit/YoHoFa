@@ -153,7 +153,7 @@ func TestCoreObjectsValuesAndRelations(t *testing.T) {
 		}
 	}
 	var objects []FinancialObject
-	for _, kind := range []string{"asset", "debt", "expense", "reserve"} {
+	for _, kind := range []string{"asset", "debt", "expense", "reserve", "financial"} {
 		object, err := s.CreateFinancialObject(ctx, SaveFinancialObject{ObjectType: kind, Name: " " + kind + " "})
 		if err != nil || object.Name != kind {
 			t.Fatalf("create %s: %v, %v", kind, object, err)

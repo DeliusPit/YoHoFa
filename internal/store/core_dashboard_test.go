@@ -102,12 +102,82 @@ func TestCoreDashboardEmptyAndInvalidPeriods(t *testing.T) {
 	}
 	defer s.Close()
 	item, err := s.Dashboard(context.Background(), 0, 0)
-	if err != nil || item.Year != time.Now().Year() || len(item.ObjectGroups) != 4 || item.NetWorthCents != 0 || item.Transactions.Count != 0 || len(item.AvailableYears) == 0 {
+	if err != nil || item.Year != time.Now().Year() || len(item.ObjectGroups) != 5 || item.ObjectGroups[4].ObjectType != "financial" || item.NetWorthCents != 0 || item.Transactions.Count != 0 || len(item.AvailableYears) == 0 {
 		t.Fatalf("empty dashboard: %+v, %v", item, err)
 	}
 	for _, period := range [][2]int{{-1, 0}, {10000, 0}, {2026, -1}, {2026, 13}} {
 		if _, err := s.Dashboard(context.Background(), period[0], period[1]); !errors.Is(err, ErrCoreInvalid) {
 			t.Fatalf("invalid period accepted: %v", err)
 		}
+	}
+}
+
+func TestCoreBudgetGroupsAllocatedTransactionsByObject(t *testing.T) {
+	ctx := context.Background()
+	s, err := OpenCore(ctx, filepath.Join(t.TempDir(), "budget.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	last, err := s.CreateFinancialObject(ctx, SaveFinancialObject{ObjectType: "expense", Name: "Boodschappen"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reserve, err := s.CreateFinancialObject(ctx, SaveFinancialObject{ObjectType: "reserve", Name: "Vakantie"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	asset, err := s.CreateFinancialObject(ctx, SaveFinancialObject{ObjectType: "asset", Name: "Spaarrekening"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	debt, err := s.CreateFinancialObject(ctx, SaveFinancialObject{ObjectType: "debt", Name: "Lening"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateObjectValue(ctx, last.ID, SaveObjectValue{ValueDate: "2026-01-01", ValueCents: cents(50000)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []struct {
+		objectID int64
+		cents    int64
+	}{{asset.ID, 200000}, {debt.ID, 50000}} {
+		if _, err := s.CreateObjectValue(ctx, value.objectID, SaveObjectValue{ValueDate: "2026-01-01", ValueCents: cents(value.cents)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, input := range []SaveCoreTransaction{
+		{TransactionDate: "2026-01-10", AmountCents: cents(-30000), Description: "Supermarkt", Allocations: []TransactionObjectInput{{FinancialObjectID: last.ID, AmountCents: cents(-30000)}}},
+		{TransactionDate: "2026-01-20", AmountCents: cents(-25000), Description: "Groente", Allocations: []TransactionObjectInput{{FinancialObjectID: last.ID, AmountCents: cents(-25000)}, {FinancialObjectID: reserve.ID}}},
+		{TransactionDate: "2026-01-25", AmountCents: cents(20000), Description: "Inleg", Allocations: []TransactionObjectInput{{FinancialObjectID: asset.ID, AmountCents: cents(20000)}}},
+		{TransactionDate: "2026-01-26", AmountCents: cents(-10000), Description: "Aflossing", Allocations: []TransactionObjectInput{{FinancialObjectID: debt.ID, AmountCents: cents(-10000)}}},
+		{TransactionDate: "2026-02-01", AmountCents: cents(-10000), Description: "Later", Allocations: []TransactionObjectInput{{FinancialObjectID: last.ID, AmountCents: cents(-10000)}}},
+	} {
+		if _, err := s.CreateCoreTransaction(ctx, input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	budget, err := s.Budget(ctx, 2026, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if budget.From != "2026-01-01" || budget.To != "2026-01-31" || len(budget.Items) != 4 {
+		t.Fatalf("budget period/items: %+v", budget)
+	}
+	if budget.Summary.AssetChangeCents != 20000 || budget.Summary.DebtChangeCents != -10000 || budget.Summary.ExpenseBudgetCents != 50000 || budget.Summary.ExpenseActualCents != 55000 {
+		t.Fatalf("budget summary: %+v", budget.Summary)
+	}
+	items := map[int64]CoreBudgetItem{}
+	for _, item := range budget.Items {
+		items[item.FinancialObjectID] = item
+	}
+	if item := items[last.ID]; item.PeriodAmountCents != -55000 || item.MonthlyMaximumCents == nil || *item.MonthlyMaximumCents != 50000 || len(item.Transactions) != 2 {
+		t.Fatalf("expense budget: %+v", item)
+	}
+	if item := items[reserve.ID]; item.PeriodAmountCents != 0 || item.MonthlyMaximumCents != nil || len(item.Transactions) != 1 || item.Transactions[0].AllocationCents != nil {
+		t.Fatalf("context transaction must remain visible without affecting totals: %+v", item)
+	}
+	if _, err := s.Budget(ctx, 2026, 13); !errors.Is(err, ErrCoreInvalid) {
+		t.Fatalf("invalid budget period accepted: %v", err)
 	}
 }

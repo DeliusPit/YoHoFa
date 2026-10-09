@@ -49,7 +49,7 @@ type chatCompletionRequest struct {
 	MaxTokens          int                `json:"max_tokens"`
 	Stream             bool               `json:"stream"`
 	ChatTemplateKwargs chatTemplateKwargs `json:"chat_template_kwargs,omitempty"`
-	ResponseFormat     responseFormat     `json:"response_format,omitempty"`
+	ResponseFormat     *responseFormat    `json:"response_format,omitempty"`
 	Messages           []chatMessage      `json:"messages"`
 }
 
@@ -58,14 +58,7 @@ type chatTemplateKwargs struct {
 }
 
 type responseFormat struct {
-	Type       string      `json:"type"`
-	JSONSchema *jsonSchema `json:"json_schema,omitempty"`
-}
-
-type jsonSchema struct {
-	Name   string         `json:"name"`
-	Strict bool           `json:"strict"`
-	Schema map[string]any `json:"schema"`
+	Type string `json:"type"`
 }
 
 type chatMessage struct {
@@ -546,7 +539,7 @@ func bankImportAIChatRequest(model string, item bankconfig.Config, categories []
 		MaxTokens:          2000,
 		Stream:             false,
 		ChatTemplateKwargs: chatTemplateKwargs{EnableThinking: false},
-		ResponseFormat:     responseFormat{Type: "json_schema", JSONSchema: &jsonSchema{Name: "categorized_transactions", Strict: true, Schema: bankImportAIJSONSchema()}},
+		ResponseFormat:     &responseFormat{Type: "json_object"},
 		Messages: []chatMessage{
 			{Role: "system", Content: "Je categoriseert Nederlandse banktransacties. Kies uitsluitend een category_id uit de opgegeven categorieen. Categoriseer iedere transactieregel exact een keer. Verander geen bedragen of transactiedata. Gebruik row_index om naar de invoerregel te verwijzen. Geef uitsluitend JSON terug volgens het schema."},
 			{Role: "user", Content: bankImportAIPrompt(item, categories, rows)},
@@ -561,34 +554,11 @@ func transactionAIChatRequest(model string, categories []bankImportAICategory, t
 		MaxTokens:          2000,
 		Stream:             false,
 		ChatTemplateKwargs: chatTemplateKwargs{EnableThinking: false},
-		ResponseFormat:     responseFormat{Type: "json_schema", JSONSchema: &jsonSchema{Name: "categorized_transactions", Strict: true, Schema: bankImportAIJSONSchema()}},
+		ResponseFormat:     &responseFormat{Type: "json_object"},
 		Messages: []chatMessage{
 			{Role: "system", Content: "Je categoriseert Nederlandse banktransacties. Kies uitsluitend een category_id uit de opgegeven categorieen. Categoriseer iedere transactieregel exact een keer. Verander geen bedragen of transactiedata. Gebruik row_index om naar de invoerregel te verwijzen. Geef uitsluitend JSON terug volgens het schema."},
 			{Role: "user", Content: transactionAIPrompt(categories, transactions)},
 		},
-	}
-}
-
-func bankImportAIJSONSchema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"transactions": map[string]any{
-				"type": "array",
-				"items": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"row_index":   map[string]any{"type": "integer"},
-						"category_id": map[string]any{"type": "string"},
-						"confidence":  map[string]any{"type": "number"},
-					},
-					"required":             []string{"row_index", "category_id", "confidence"},
-					"additionalProperties": false,
-				},
-			},
-		},
-		"required":             []string{"transactions"},
-		"additionalProperties": false,
 	}
 }
 

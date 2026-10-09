@@ -2,11 +2,11 @@
 
 Status: **stappen 1 en 2 plus handmatige transacties geïmplementeerd**. Schema, versiebeheer, object-/waarde-/relatiebeheer en inkomsten/uitgaven met objecttoewijzingen werken via API en browser. Bankimport en documentflows zijn vervolgstappen.
 
-Dit document legt het complete vereenvoudigde doelmodel vast. De kern bestaat uit **negen tabellen**. Het [canonieke SQLite-schema](../internal/store/core_schema.sql) vertaalt de aangeleverde tabeldefinities naar de gekozen database, met dezelfde velden en relaties, en wordt door de actieve store ingebed. Het [v2-datamodel](data-model.md) is historisch.
+Dit document legt het complete vereenvoudigde doelmodel vast. De kern bestaat uit **negen tabellen**. Het [canonieke SQLite-schema](../internal/store/core_schema.sql) vertaalt de tabeldefinities naar SQLite en wordt door de actieve store ingebed.
 
 De [technische architectuur v3](technical-architecture-v3.md) gebruikt uitsluitend SQLite voor gestructureerde data en Garage/S3 voor documenten. Eén Go-service levert de browserfrontend en API, gedeployed met Docker Compose. De [actieve API](api-v3.md) beschrijft het object-, waarde- en relatiebeheer.
 
-Eén HoHoHo-deployment/database vertegenwoordigt één huishouden. Het doelmodel bevat geen `households`-tabel of `household_id`-velden.
+Eén YoHoFa-deployment/database vertegenwoordigt één huishouden. Het doelmodel bevat geen `households`-tabel of `household_id`-velden.
 
 **Uitvoeringsbesluit:** alle bestaande administratiegegevens mogen vervallen. V3 begint met een nieuwe, lege SQLite-database en zonder oude documentkoppelingen. Dataconversie, ID-mapping en een migratiearchief zijn niet nodig. Het daadwerkelijk verwijderen van oude opslag is een aparte uitvoeringsstap.
 
@@ -20,8 +20,9 @@ Een financieel object heeft alleen een ID, type, naam en omschrijving.
 | `debt` | Schuld | Hypotheek, lening |
 | `reserve` | Reservering | Nieuw dak, toekomstige onderhoudskosten |
 | `expense` | Last | Boodschappen, benzine, zorgverzekering |
+| `financial` | Financieel | Inkomsten, contantgeldopnames, interne overboekingen |
 
-De applicatie valideert deze vier typewaarden; de aangeleverde SQL gebruikt hiervoor een vrij tekstveld.
+De applicatie valideert deze vijf typewaarden; de aangeleverde SQL gebruikt hiervoor een vrij tekstveld.
 
 Transacties en documenten worden aan één of meer financiële objecten gekoppeld. Een nieuw object aanmaken vereist geen nieuwe domeintabel.
 
@@ -44,7 +45,7 @@ bank_import_profiles
 ### `financial_objects`
 
 - `id`: identificatie.
-- `object_type`: `asset`, `debt`, `reserve` of `expense`.
+- `object_type`: `asset`, `debt`, `reserve`, `expense` of `financial`.
 - `name`: naam van het object.
 - `description`: optionele toelichting.
 
@@ -87,11 +88,11 @@ De applicatie controleert gelijke tekens, unieke objectkoppelingen en het voorko
 - `description`: optionele omschrijving.
 - `extracted_text`: tekst uit het document.
 - `translated_text`: Nederlandse vertaling van de documenttekst.
-- `analysis_json`: gestructureerde analyse van de externe PDF-AI-service.
+- `analysis_json`: gestructureerde documentanalyse uit lokale tekstextractie/OCR plus OpenAI-compatible LLM.
 
 SQLite bewaart metadata en tekst/analyses; S3/Garage bewaart de fysieke bestanden. De S3-configuratie bepaalt de opslaglocatie. Objectkeys bevatten geen classificatie of andere businessbetekenis.
 
-De externe PDF-AI-service verzorgt OCR indien nodig, tekstextractie, vertaling en AI-analyse. De resultaten komen rechtstreeks in de drie inhoudsvelden op `documents`. De tabel heeft geen direct `financial_object_id`.
+YoHoFa verzorgt tekstextractie en OCR lokaal met de runtime-tools in de app-container. De geconfigureerde OpenAI-compatible LLM verzorgt vertaling en analyse op basis van die tekst en krijgt bestaande financiële objecten aangeboden. De resultaten komen in de drie inhoudsvelden op `documents`; objectkoppelingen worden apart opgeslagen via `document_financial_objects`. De tabel heeft geen direct `financial_object_id`.
 
 ### `document_financial_objects`
 
@@ -194,7 +195,7 @@ Voorbeelden:
 - Nieuw dak → `reserved_for` → Woning Sögel.
 - Benzine → `used_for` → Subaru.
 
-Maak geen enum of aparte relatietypetabel. Nieuwe relatietekst introduceert ook geen nieuw objecttype: de eindpunten blijven binnen de vier financiële objecttypes.
+Maak geen enum of aparte relatietypetabel. Nieuwe relatietekst introduceert ook geen nieuw objecttype: de eindpunten blijven binnen de vijf financiële objecttypes.
 
 ## 3. Belangrijke ontwerpregels
 
@@ -230,9 +231,9 @@ Gerealiseerd: `config.RuntimeFromEnv`, `store.OpenCore`, `httpserver.NewCore` en
 | Bankimport | Geconfigureerde CSV-profielen, ruwe regels, canonieke transacties en fingerprint-gebaseerde deduplicatie per profiel |
 | Waarden en relaties | Waardehistorie en object-objectrelaties generiek opslaan; actuele waarden op meest recente datum lezen |
 | Documentopslag | S3/Garage gebruiken voor nieuwe uploads; metadata en koppelingen in SQLite |
-| PDF-AI | Response expliciet mappen naar `extracted_text`, `translated_text`, `analysis_json` |
+| Document-AI | Lokale tekst/OCR en LLM-response expliciet mappen naar `extracted_text`, `translated_text`, `analysis_json` en gevalideerde document-objectkoppelingen |
 | HTTP API | Objectgerichte routes en koppelingen aanbieden; bestaande domeinroutes vervangen zodra de UI is omgezet |
-| Frontend | Beheer van de vier objecttypes, waarden, relaties, importprofielen, transactie-/documentkoppeling en bedragstoewijzing; filters en rapporten daarop aanpassen |
+| Frontend | Beheer van de vijf objecttypes, waarden, relaties, importprofielen, transactie-/documentkoppeling en bedragstoewijzing; filters en rapporten daarop aanpassen |
 | Startup | `ensureSchema` en `seedDefaults` aanpassen zodat het oude model niet opnieuw wordt aangemaakt |
 | Opslag | Eén SQLite-implementatie en Garage/S3-documentstore; database-/objectbackendkeuzes en opslagprofielen vervangen |
 | Herstel en checks | Backup/herstel, startup en bestaande verificatiescripts op het vereenvoudigde schema afstemmen |
@@ -245,7 +246,7 @@ De overstap is een vervanging van de applicatiestructuur, geen dataconversie. Be
 
 Na het bouwen van de opslagbasis bestaan alle negen tabellen en hun foreign keys, maar bevatten ze geen records. Bij herstart blijft het nieuwe SQLite-bestand behouden. De oude startupcode mag daar geen v2-tabellen of voorbeeldgegevens aan toevoegen.
 
-De administratie wordt vervolgens vanuit de browser gevuld met financiële objecten, waarden, relaties, importprofielen, transacties en documenten. De nieuwe documentopslag krijgt een eigen lege bucket voor HoHoHo; het wissen van oude objecten richt zich uitsluitend op de oude HoHoHo-opslag, niet op andere Garage-buckets.
+De administratie wordt vervolgens vanuit de browser gevuld met financiële objecten, waarden, relaties, importprofielen, transacties en documenten. De nieuwe documentopslag krijgt een eigen lege bucket voor YoHoFa; het wissen van oude objecten richt zich uitsluitend op de oude YoHoFa-opslag, niet op andere Garage-buckets.
 
 Het SQL-model bepaalt geen valuta; de applicatie moet één expliciete bedrag-/valutaconventie gebruiken. Een reserveringsbedrag is geen vrij beschikbaar bezit; een positief opgeslagen schuld wordt bij nettovermogen afgetrokken.
 
@@ -257,8 +258,8 @@ Een gewijzigde importconfiguratie verandert de reeds opgeslagen canonieke transa
 
 1. Leg de huidige code vast en ontwikkel v3 op `v3-simplification`; het besluit om leeg te starten staat hierboven.
 2. Bouw de nieuwe SQLite-schema-/storelaag, schemaversiebeheer en basis voor objecten, waarden en relaties. Start zonder records of oude seeds.
-3. Zet API, configureerbare import, PDF-AI en frontend om naar de negen tabellen.
+3. Zet API, configureerbare import, document-AI en frontend om naar de negen tabellen.
 4. Verifieer met zelf aangemaakte testgegevens: allocaties, waardehistorie, relaties, importherkomst, documentinhoud, herstart en herstel.
-5. Deploy v3 met een lege administratie en ruim de vervangen code en oude HoHoHo-opslag als expliciete uitvoeringsstappen op.
+5. Deploy v3 met een lege administratie en ruim de vervangen code en oude YoHoFa-opslag als expliciete uitvoeringsstappen op.
 
-Acceptatie: de applicatie gebruikt operationeel uitsluitend deze negen domeintabellen in SQLite, valideert de vier objecttypes, ondersteunt meerdere koppelingen per transactie/document, controleert volledige bedragstoewijzing en telt bedragen in rapportages niet dubbel. Waarden zijn historisch, objectrelatietypes zijn vrije tekst en bankverschillen komen uit profielen. Beschikbare originele bronregels blijven herleidbaar naar transacties. Eén database vertegenwoordigt één huishouden. Documenten staan in Garage/S3; de browserapp, startup en herstel werken via de nieuwe Compose-deployment.
+Acceptatie: de applicatie gebruikt operationeel uitsluitend deze negen domeintabellen in SQLite, valideert de vijf objecttypes, ondersteunt meerdere koppelingen per transactie/document, controleert volledige bedragstoewijzing en telt bedragen in rapportages niet dubbel. Waarden zijn historisch, objectrelatietypes zijn vrije tekst en bankverschillen komen uit profielen. Beschikbare originele bronregels blijven herleidbaar naar transacties. Eén database vertegenwoordigt één huishouden. Documenten staan in Garage/S3; de browserapp, startup en herstel werken via de nieuwe Compose-deployment.

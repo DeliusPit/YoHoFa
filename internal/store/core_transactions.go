@@ -64,6 +64,11 @@ type CoreTransactionPage struct {
 	BalanceCents int64             `json:"balanceCents"`
 }
 
+type BulkCoreTransactionClassification struct {
+	TransactionIDs    []int64 `json:"transactionIds"`
+	FinancialObjectID int64   `json:"financialObjectId"`
+}
+
 func normalizeCoreTransaction(input SaveCoreTransaction) (SaveCoreTransaction, error) {
 	date, err := time.Parse("2006-01-02", input.TransactionDate)
 	if err != nil || date.Format("2006-01-02") != input.TransactionDate || input.AmountCents == nil || *input.AmountCents == 0 {
@@ -359,6 +364,44 @@ func (s *Core) ApplyAITransactionClassifications(ctx context.Context, allocation
 		result, err := tx.ExecContext(ctx, "UPDATE transactions SET status = 'F' WHERE id = ? AND status IN ('I', 'F') AND hidden = 0", transactionID)
 		if err := coreMutationError(result, err); err != nil {
 			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Core) BulkClassifyCoreTransactions(ctx context.Context, input BulkCoreTransactionClassification) error {
+	if input.FinancialObjectID <= 0 || len(input.TransactionIDs) == 0 || len(input.TransactionIDs) > 100 {
+		return ErrCoreInvalid
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var objectID int64
+	if err := tx.QueryRowContext(ctx, "SELECT id FROM financial_objects WHERE id = ?", input.FinancialObjectID).Scan(&objectID); err != nil {
+		return coreStoreError(err)
+	}
+	amounts := make([]int64, len(input.TransactionIDs))
+	seen := make(map[int64]bool, len(input.TransactionIDs))
+	for index, transactionID := range input.TransactionIDs {
+		if transactionID <= 0 || seen[transactionID] {
+			return ErrCoreInvalid
+		}
+		seen[transactionID] = true
+		if err := tx.QueryRowContext(ctx, "SELECT amount_cents FROM transactions WHERE id = ? AND hidden = 0", transactionID).Scan(&amounts[index]); err != nil {
+			return coreStoreError(err)
+		}
+	}
+	for index, transactionID := range input.TransactionIDs {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM transaction_financial_objects WHERE transaction_id = ?", transactionID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO transaction_financial_objects (transaction_id, financial_object_id, amount_cents) VALUES (?, ?, ?)", transactionID, input.FinancialObjectID, amounts[index]); err != nil {
+			return coreStoreError(err)
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE transactions SET status = 'U' WHERE id = ?", transactionID); err != nil {
+			return coreStoreError(err)
 		}
 	}
 	return tx.Commit()

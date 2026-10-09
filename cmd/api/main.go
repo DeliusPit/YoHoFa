@@ -61,9 +61,9 @@ func run(logger *slog.Logger) error {
 	maintenance := &maintenance.Gate{}
 	backupService.SetQuiesce(maintenance.Lock)
 	coreDeps := httpserver.CoreDependencies{Config: cfg, Store: db, Objects: objectStorage, SystemBackup: backupService, Logger: logger, Maintenance: maintenance}
-	// De PDF-AI-analyse blijft bewust los van de opslag: zonder URL is er
-	// geen analyzer en werkt uploaden gewoon door.
-	if analyzer := pdfAIAnalyzer(cfg, objectStorage); analyzer != nil {
+	// Documentanalyse blijft bewust los van opslag: de analyzer leest documenten
+	// uit S3 en gebruikt lokale PDF/OCR-tools plus de geconfigureerde LLM.
+	if analyzer := documentAIAnalyzer(cfg, objectStorage, db); analyzer != nil {
 		coreDeps.DocumentAnalyzer = analyzer
 		coreDeps.DocumentAnalysisQueue = make(chan store.CoreDocument, 16)
 	}
@@ -81,7 +81,7 @@ func run(logger *slog.Logger) error {
 	}
 	result := make(chan error, 1)
 	go func() {
-		logger.Info("HoHoHo v3 gestart", "addr", cfg.HTTPAddr, "database", "sqlite", "schema_version", store.CoreSchemaVersion)
+		logger.Info("YoHoFa v3 gestart", "addr", cfg.HTTPAddr, "database", "sqlite", "schema_version", store.CoreSchemaVersion)
 		result <- server.ListenAndServe()
 	}()
 	select {

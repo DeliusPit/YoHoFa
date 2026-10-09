@@ -365,7 +365,7 @@ func (s *Core) CoreSummary(ctx context.Context) (CoreSummary, error) {
 }
 
 func validFinancialObjectType(value string) bool {
-	return value == "asset" || value == "debt" || value == "expense" || value == "reserve"
+	return value == "asset" || value == "debt" || value == "expense" || value == "reserve" || value == "financial"
 }
 
 func normalizeFinancialObject(input SaveFinancialObject) (SaveFinancialObject, error) {
@@ -373,7 +373,7 @@ func normalizeFinancialObject(input SaveFinancialObject) (SaveFinancialObject, e
 	input.Name = strings.TrimSpace(input.Name)
 	input.Description = strings.TrimSpace(input.Description)
 	if !validFinancialObjectType(input.ObjectType) || input.Name == "" {
-		return input, fmt.Errorf("%w: kies een van de vier objecttypes en vul een naam in", ErrCoreInvalid)
+		return input, fmt.Errorf("%w: kies een geldig objecttype en vul een naam in", ErrCoreInvalid)
 	}
 	return input, nil
 }

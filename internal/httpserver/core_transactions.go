@@ -58,6 +58,14 @@ func registerCoreTransactionRoutes(mux *http.ServeMux, deps CoreDependencies) {
 		}
 		coreRespond(w, r, deps, http.StatusOK, map[string]int{"classified": len(allocations), "failed": len(failed)}, nil)
 	})
+	mux.HandleFunc("POST /api/v1/transactions/bulk-classify", func(w http.ResponseWriter, r *http.Request) {
+		var input store.BulkCoreTransactionClassification
+		if !coreDecode(w, r, &input) {
+			return
+		}
+		err := deps.Store.BulkClassifyCoreTransactions(r.Context(), input)
+		coreRespond(w, r, deps, http.StatusNoContent, nil, err)
+	})
 	mux.HandleFunc("POST /api/v1/transactions", func(w http.ResponseWriter, r *http.Request) {
 		var input store.SaveCoreTransaction
 		if !coreDecode(w, r, &input) {

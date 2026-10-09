@@ -53,7 +53,7 @@ func (s *Core) Dashboard(ctx context.Context, year, month int) (CoreDashboard, e
 	item := CoreDashboard{
 		Year: year, Month: month, From: from.Format("2006-01-02"), To: to.Format("2006-01-02"),
 		AvailableYears: []int{},
-		ObjectGroups:   []DashboardObjectGroup{{ObjectType: "asset"}, {ObjectType: "debt"}, {ObjectType: "reserve"}, {ObjectType: "expense"}},
+		ObjectGroups:   []DashboardObjectGroup{{ObjectType: "asset"}, {ObjectType: "debt"}, {ObjectType: "reserve"}, {ObjectType: "expense"}, {ObjectType: "financial"}},
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {

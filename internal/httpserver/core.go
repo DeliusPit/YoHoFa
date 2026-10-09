@@ -188,8 +188,11 @@ func RunCoreDocumentAnalysis(ctx context.Context, deps CoreDependencies) {
 		case <-ctx.Done():
 			return
 		case document := <-deps.DocumentAnalysisQueue:
-			extractedText, translatedText, analysisJSON, err := deps.DocumentAnalyzer.AnalyzeDocument(ctx, document)
+			result, err := deps.DocumentAnalyzer.AnalyzeDocument(ctx, document)
 			if err != nil {
+				if statusErr := deps.Store.UpdateCoreDocumentStatus(ctx, document.ID, "F"); statusErr != nil {
+					deps.Logger.Error("documentanalyse-foutstatus opslaan mislukt", "document_id", document.ID, "error", statusErr)
+				}
 				deps.Logger.Error("automatische documentanalyse mislukt", "document_id", document.ID, "error", err)
 				continue
 			}
@@ -197,7 +200,10 @@ func RunCoreDocumentAnalysis(ctx context.Context, deps CoreDependencies) {
 			if deps.Maintenance != nil {
 				release = deps.Maintenance.ReadLock()
 			}
-			err = deps.Store.UpdateCoreDocumentContent(ctx, document.ID, extractedText, translatedText, analysisJSON)
+			err = deps.Store.UpdateCoreDocumentContent(ctx, document.ID, result.ExtractedText, result.TranslatedText, result.AnalysisJSON)
+			if err == nil {
+				err = linkAnalyzedDocumentObjects(ctx, deps, document.ID, result.FinancialObjectIDs)
+			}
 			if release != nil {
 				release()
 			}

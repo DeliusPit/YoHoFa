@@ -21,9 +21,13 @@ services:
       WEB_DIR: /app/web/dist
       DATABASE_PATH: /app/data/hohoho.db
       BANK_CONFIG_DIR: /app/config/banks
+      TRANSLATION_DIR: /app/config/translations
+      AI_DOCS_CONFIG_PATH: /app/config/ai-docs.yaml
     volumes:
       - ./data/v3:/app/data
       - ./config/banks:/app/config/banks
+      - ./config/translations:/app/config/translations
+      - ./config/ai-docs.yaml:/app/config/ai-docs.yaml
     networks:
       - hohoho-backend
 

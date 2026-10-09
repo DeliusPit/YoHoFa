@@ -2,7 +2,7 @@
 
 De actieve API van `cmd/api` gebruikt uitsluitend de SQLite-kern met Garage/S3 voor documentbytes. Objectbeheer, waarden, relaties, samenvatting, handmatige transacties met objecttoewijzingen, CSV-bankimport, documenten en systeembackup zijn beschikbaar.
 
-Alle bedragen zijn integer centen. De browserinterface gebruikt EUR als huidige weergaveconventie. Objecttypes zijn exact `asset`, `debt`, `expense`, `reserve`. Relatietypes zijn vrije niet-lege tekst.
+Alle bedragen zijn integer centen. De browserinterface gebruikt EUR als huidige weergaveconventie. Objecttypes zijn exact `asset`, `debt`, `expense`, `reserve`, `financial`. Relatietypes zijn vrije niet-lege tekst.
 
 ## Beschikbaarheid en authenticatie
 
@@ -20,7 +20,7 @@ De response bevat:
 
 - `year`, `month`, `from`, `to`: gekozen jaar/maand en inclusieve kalendergrenzen.
 - `availableYears`: jaren uit transacties en waarderingen, plus het huidige jaar.
-- `objectGroups`: per asset/debt/reserve/expense het aantal huidige objecten, `valuedCount`, de som van bekende `valueCents` en `periodAmountCents` (expliciet toegewezen mutaties in de periode).
+- `objectGroups`: per asset/debt/reserve/expense/financial het aantal huidige objecten, `valuedCount`, de som van bekende `valueCents` en `periodAmountCents` (expliciet toegewezen mutaties in de periode).
 - `netWorthCents`: bekende bezitwaarden minus bekende schuldsaldi. Reserveringen en lasten worden niet afgetrokken als actuele schuld.
 - `transactions`: aantal posten, aantallen inkomsten/uitgaven, `incomeCents`, negatief `expenseCents`, `balanceCents` en `unallocatedCount` (nog niet volledig toegewezen transacties).
 
@@ -30,11 +30,13 @@ Transactiebedragen worden uitsluitend binnen `from` t/m `to` opgeteld, één kee
 
 De browser toont jaar- en maandknoppen boven beide panelen. Een andere jaarselectie kiest eerst het hele jaar; klikken op een geselecteerde maand kiest weer het hele jaar. Het dashboard houdt een eigen periode bij en verandert geen ingevoerde gegevens of de filters van het transactiebeheer.
 
+`GET /api/v1/budget?year=2026&month=10` gebruikt dezelfde periode-invoer en levert alleen financiële objecten met gekoppelde, zichtbare transacties in die periode. Per object bevat de response alle bijbehorende posten en de expliciet toegewezen bedragen. Bij een last is `monthlyMaximumCents` de laatste objectwaarde op of voor het einde van de periode, als maandelijks maximum. De browser vergelijkt dit met de werkelijke uitgaven; voor een heel jaar wordt het maandmaximum met twaalf vermenigvuldigd.
+
 ## Financiële objecten
 
 | Methode en pad | Werking |
 | --- | --- |
-| `GET /api/v1/financial-objects` | Alle objecten; optioneel `?type=asset` (of een van de andere drie types) |
+| `GET /api/v1/financial-objects` | Alle objecten; optioneel `?type=asset` of een van de andere objecttypes |
 | `POST /api/v1/financial-objects` | Object aanmaken; 201 |
 | `GET /api/v1/financial-objects/{id}` | Eén object; 200 |
 | `PUT /api/v1/financial-objects/{id}` | Type, naam en omschrijving vervangen; 200 |
@@ -86,6 +88,7 @@ Beide objecten moeten bestaan, de eindpunten moeten verschillend zijn en het rel
 | --- | --- |
 | `GET /api/v1/transactions` | Transactieoverzicht met totalen en paginering |
 | `POST /api/v1/transactions` | Transactie met optionele objecttoewijzingen aanmaken; 201 |
+| `POST /api/v1/transactions/bulk-classify` | Geselecteerde zichtbare transacties volledig aan één financieel object toewijzen; 204 |
 | `GET /api/v1/transactions/{id}` | Eén transactie inclusief koppelingen en toewijzingsstatus |
 | `PUT /api/v1/transactions/{id}` | Gegevens en alle koppelingen atomair vervangen; 200 |
 | `DELETE /api/v1/transactions/{id}` | Transactie en eigen objectkoppelingen atomair verwijderen; 204 |
@@ -119,6 +122,34 @@ GET-lijst accepteert `direction=income` of `direction=expense` (weglaten voor be
 
 De browser laat een positief bedrag invoeren en bepaalt het teken uit Inkomst/Uitgave. Het formulier ondersteunt meerdere objectkoppelingen, splitsingen en een knop om het volledige bedrag aan een object toe te wijzen.
 
+## Documenten
+
+| Methode en pad | Werking |
+| --- | --- |
+| `GET /api/v1/documents` | Alle documenten, inclusief status, analyse en gekoppelde object-ID's |
+| `POST /api/v1/documents` | Document uploaden naar S3/Garage en metadata opslaan; zet analyse in de queue als document-AI beschikbaar is |
+| `POST /api/v1/documents/analyze-batch` | Alle documenten met status `I` of `F` opnieuw in de analysequeue zetten |
+| `POST /api/v1/documents/analyze-selected` | Opgegeven document-ID's opnieuw in de analysequeue zetten |
+| `GET /api/v1/documents/{id}` | Eén document |
+| `GET /api/v1/documents/{id}/content` | Originele documentbytes via de API streamen |
+| `POST /api/v1/documents/{id}/analyze` | Eén document direct analyseren en resultaat opslaan |
+| `POST /api/v1/documents/{id}/links` | Document handmatig aan een financieel object koppelen |
+| `DELETE /api/v1/documents/{id}/links/{objectId}` | Document-objectkoppeling verwijderen |
+| `POST /api/v1/documents/{id}/classify/manual` | Documentstatus op handmatig geclassificeerd zetten |
+| `DELETE /api/v1/documents/{id}` | Metadata en objectbytes verwijderen |
+
+Upload gebruikt `multipart/form-data` met veld `file`; documenten zijn maximaal 25 MiB. De originele bytes staan uitsluitend in S3/Garage. SQLite bewaart metadata, `extractedText`, `translatedText`, `analysis` en `financialObjectIds`.
+
+`POST /api/v1/documents/analyze-selected` accepteert:
+
+```json
+{"documentIds":[1,2,3]}
+```
+
+Ongeldige, dubbele of verdwenen IDs worden genegeerd. De response is `202 Accepted` met `{ "queued": n }`.
+
+Document-AI haalt tekst lokaal uit PDF's en afbeeldingen met de runtime-tools in de app-container. De OpenAI-compatible LLM krijgt bestaande financiële objecten mee en mag alleen bestaande object-ID's teruggeven. De backend valideert deze IDs opnieuw voordat koppelingen in `document_financial_objects` worden opgeslagen.
+
 ## Bankimport
 
 | Methode en pad | Werking |
@@ -130,7 +161,7 @@ De browser laat een positief bedrag invoeren en bepaalt het teken uit Inkomst/Ui
 | `POST /api/v1/bank-imports/preview` | CSV lokaal parsen via gekozen bankconfiguratie |
 | `POST /api/v1/bank-imports` | CSV importeren als niet-geclassificeerde transacties |
 
-Preview en import gebruiken `multipart/form-data` met `bankConfig` en `file`. Bestanden zijn maximaal 8 MiB; een definitieve import bevat maximaal 5.000 transactieregels. De response bevat `total`, `imported` en `skipped`. Dezelfde genormaliseerde datum, bedrag, omschrijving en tegenpartij binnen hetzelfde importprofiel wordt als duplicaat overgeslagen, ook bij een tweede upload van hetzelfde bestand. Classificatie is een afzonderlijke actie via `POST /api/v1/transactions/classify-ai`; het AI-contract staat in `docs/ai-bankimport.md`.
+Preview en import gebruiken `multipart/form-data` met `bankConfig` en `file`. Bestanden zijn maximaal 8 MiB; een definitieve import bevat maximaal 5.000 transactieregels. De response bevat `total`, `imported` en `skipped`. Dezelfde genormaliseerde datum, bedrag, omschrijving en tegenpartij binnen hetzelfde importprofiel wordt als duplicaat overgeslagen, ook bij een tweede upload van hetzelfde bestand. Classificatie is een afzonderlijke actie via `POST /api/v1/transactions/classify-ai`; het AI-contract staat in [Bankimport en AI](ai-bankimport.md).
 
 ## Fouten en invoer
 
@@ -142,6 +173,19 @@ Preview en import gebruiken `multipart/form-data` met `bankConfig` en `file`. Be
 - 500: interne databasefout; details blijven uit de response.
 
 Mutatiebodies zijn begrensd op 64 KiB. Objecten, transacties, waarden en relaties worden persistent opgeslagen; lege lijsten zijn `[]`, niet `null`.
+
+## Systeemconfiguratie
+
+| Methode en pad | Werking |
+| --- | --- |
+| `GET /api/v1/system/configuration` | Runtimeconfiguratie, databasekeuze, S3-status, AI-status en beschikbare talen |
+| `PUT /api/v1/system/configuration` | S3-, taal-, database- en AI-instellingen opslaan |
+| `GET /api/v1/system/transaction-ai-models?url=...` | Modellen ophalen via OpenAI-compatible `/models` endpoint |
+| `GET /api/v1/system/ai-docs-config` | `config/ai-docs.yaml` lezen |
+| `PUT /api/v1/system/ai-docs-config` | Document-AI YAML-configuratie opslaan |
+
+De databasebackend is vast SQLite. `databasePath` mag alleen naar een `.db`-bestand binnen dezelfde datamap wijzen, standaard `/app/data`. Een gewijzigde databasekeuze wordt actief na herstart. Document-AI gebruikt `pdfAiUrl` en `pdfAiModel`; wanneer de UI dat aangeeft kunnen dezelfde URL en model ook voor transactie-AI worden gebruikt.
+
 ## Systeembackup
 
 `GET /api/v1/system/backup` geeft naast de configuratiestatus het backupbeleid en de tijden van de laatste controle en restore-proef terug.

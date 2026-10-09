@@ -1,8 +1,8 @@
-# HoHoHo v3 — eenvoudige browserapp met SQLite en Garage
+# YoHoFa v3 — eenvoudige browserapp met SQLite en Garage
 
-Status: **v3-runtime, bankimport, documenten en backup/herstel geïmplementeerd**. De actieve Go-service gebruikt SQLite, Garage/S3 en een browserinterface. Compose bouwt een klein app-image en gebruikt een bestaande Garage-configuratie. Beheerde Garage/bootstrap volgt later. Dit document beschrijft de gerealiseerde basis en verdere technische richting naast het [kernmodel met negen tabellen](data-model-v3.md).
+Status: **v3-runtime, bankimport, documenten, document-AI en backup/herstel geïmplementeerd**. De actieve Go-service gebruikt SQLite, Garage/S3 en een browserinterface. Compose bouwt het app-image; `setup.sh` kan daarnaast een lokale Garage/S3-container bootstrappen of bestaande S3/Garage-storage gebruiken. Dit document beschrijft de gerealiseerde basis en verdere technische richting naast het [kernmodel met negen tabellen](data-model-v3.md).
 
-**Uitvoeringsbesluit:** bestaande data mag vervallen. V3 start op `v3-simplification` met een nieuwe, lege SQLite-database en lege HoHoHo-documentopslag. Er is geen datamigrator, ID-mapping of migratiearchief nodig. Oude data verwijderen blijft een aparte uitvoeringsstap.
+**Uitvoeringsbesluit:** bestaande data mag vervallen. V3 start op `v3-simplification` met een nieuwe, lege SQLite-database en lege YoHoFa-documentopslag. Er is geen datamigrator, ID-mapping of migratiearchief nodig. Oude data verwijderen blijft een aparte uitvoeringsstap.
 
 ## 1. De vaste stack
 
@@ -12,7 +12,7 @@ Status: **v3-runtime, bankimport, documenten en backup/herstel geïmplementeerd*
 | Applicatie | Eén Go-service vanuit `cmd/api`, met HTTP API en gebouwde frontend |
 | Gestructureerde data | Alleen SQLite, als persistent bestand bij de Go-service |
 | Originele documenten | Alleen S3-compatible opslag, met Garage als deploymentprovider |
-| Documentverwerking | Bestaande externe PDF-AI-service |
+| Documentverwerking | Lokale tekstextractie/OCR in de app-container plus OpenAI-compatible LLM |
 | Deployment | Docker Compose |
 | Administratie | Eén database/deployment per huishouden |
 
@@ -26,29 +26,29 @@ De bestaande frontend en Go-backend blijven de basis. Er is geen aparte frontend
 Browser
    │ HTTP(S): frontend, API, upload en download
    ▼
-HoHoHo (één Go-service)
+YoHoFa (één Go-service)
    ├─ gebouwde frontend
    ├─ SQLite → persistent lokaal volume
    ├─ S3-client → Garage → persistente metadata- en objectvolumes
-   └─ PDF-AI-client → bestaande externe PDF-AI-service
+   └─ Document-AI → pdftotext/ocrmypdf/Tesseract + OpenAI-compatible LLM
 ```
 
-De uiteindelijke zelfstandige Compose-deployment bestaat uit twee langlopende services. De huidige Compose-definitie bevat alleen HoHoHo en sluit aan op een bestaande Garage-installatie:
+De standaardinstallatie bestaat uit YoHoFa en optioneel een lokale Garage/S3-container die door `setup.sh` wordt gegenereerd. De basis-`compose.yml` bevat alleen YoHoFa en kan ook op een bestaande Garage/S3-installatie aansluiten:
 
-- **HoHoHo:** één replica, bouw vanuit de repository-root, publiceert poort 8080 en mount een persistente datamap voor SQLite.
+- **YoHoFa:** één replica, bouw vanuit de repository-root, publiceert poort 8080 en mount een persistente datamap voor SQLite.
 - **Garage:** S3-endpoint op het interne Compose-netwerk, eigen persistente metadata- en objectopslag en eigen configuratie. S3/RPC/admin-poorten worden niet naar buiten gepubliceerd voor applicatiegebruik.
 
-De bestaande externe PDF-AI-service wordt via `PDF_AI_URL` benaderd. De HoHoHo-stack introduceert daarvoor geen extra AI-runtime. Een bestaande Garage-installatie kan via hetzelfde S3-contract worden aangesloten; de applicatieopslag blijft dezelfde vaste combinatie.
+De document-AI gebruikt lokale commandline-tools in de app-container voor tekstextractie en OCR. De geconfigureerde `PDF_AI_URL` is een OpenAI-compatible chat-completions endpoint voor vertaling en analyse; YoHoFa introduceert geen eigen LLM-runtime.
 
-Compose-builds behouden de multi-stage aanpak: Node/Vite voor de frontendbuild, Go voor de binary, een klein runtime-image met CA-certificaten en uitsluitend benodigde runtimehulpmiddelen. De huidige `FROM postgres:18`, PostgreSQL-/MariaDB-clients en bijbehorende dumpcontroles vervallen in het doelimage. Backuphulpmiddelen blijven alleen aanwezig als de gekozen backupflow ze daadwerkelijk gebruikt.
+Compose-builds gebruiken een multi-stage aanpak: Node/Vite voor de frontendbuild, Go voor de binary en een Alpine-runtime-image met CA-certificaten, `restic`, `rclone`, `sqlite`, `poppler-utils`, `ocrmypdf`, `tesseract-ocr` en taaldata voor Nederlands, Engels, Duits en Frans. PostgreSQL-/MariaDB-clients en hun dumpcontroles zijn verwijderd.
 
-Starten: `docker compose up --build -d`. De huidige `compose.yml` start de SQLite-kern op poort 8080, mount `data/v3` en bevat geen PostgreSQL-/MySQL-services. Garage zelf wordt nog niet door deze Compose-definitie gestart.
+Starten: `docker compose up --build -d` of interactief via `./setup.sh`. De huidige `compose.yml` start de SQLite-kern op poort 8080, mount `data/v3`, `config/translations` en `config/ai-docs.yaml` en bevat geen PostgreSQL-/MySQL-services.
 
 ### Garage-initialisatie
 
-Een lege Garage-node vereist initialisatie: node/layout configureren, de layout toepassen, een bucket en applicatiesleutel aanmaken en bucketrechten toekennen. Compose verzorgt containers en volumes, maar maakt die S3-configuratie niet vanzelf.
+Een lege Garage-node vereist initialisatie: node/layout configureren, de layout toepassen, een bucket en applicatiesleutel aanmaken en bucketrechten toekennen. `setup.sh` genereert hiervoor een lokale Compose-overlay en installatieplan. Deze bootstrap mag bestaande Garage-data niet resetten.
 
-Bij implementatie hoort daarom een gedocumenteerde, herhaalbare eenmalige bootstrapstap. Deze mag bestaande Garage-data niet resetten. De app start pas documentopslag wanneer bucket en toegang beschikbaar zijn. Een interne single-node Garage is het eenvoudige uitgangspunt; persistente volumes en backups verzorgen databehoud.
+De app start pas documentopslag wanneer bucket en toegang beschikbaar zijn. Een interne single-node Garage is het eenvoudige uitgangspunt; persistente volumes en backups verzorgen databehoud.
 
 ## 3. SQLite als enige structured-data-store
 
@@ -61,7 +61,7 @@ Het [canonieke SQLite-schema](../internal/store/core_schema.sql) bevat de negen 
 | `DATE` | `TEXT`, door de applicatie gevalideerd als `YYYY-MM-DD` |
 | `JSONB` | `TEXT`, met `json_valid`-checks |
 
-`object_type` blijft applicatievalidatie voor de vier toegestane types. Relatietypes blijven vrije tekst. JSON-configuratie en AI-response worden als JSON geparseerd, niet als ongevalideerde willekeurige strings gebruikt.
+`object_type` blijft applicatievalidatie voor de vijf toegestane types. Relatietypes blijven vrije tekst. JSON-configuratie en AI-response worden als JSON geparseerd, niet als ongevalideerde willekeurige strings gebruikt.
 
 ### Openen, concurrency en migraties
 
@@ -69,27 +69,28 @@ Het [canonieke SQLite-schema](../internal/store/core_schema.sql) bevat de negen 
 - Eén Go-proces beheert het bestand; geen horizontale app-replicatie op hetzelfde bestand en geen gedeelde netwerkfilesystem-database.
 - Foreign keys worden **per verbinding** aangezet en getest. Alleen de PRAGMA in een los SQL-bestand is hiervoor niet genoeg.
 - Gebruik korte databasetransacties, een begrensde wachttijd voor locks en WAL-mode. Begin met één databaseverbinding, zoals de huidige SQLite-store, voor eenvoudig voorspelbaar schrijfgedrag.
-- Wacht niet op S3- of PDF-AI-calls terwijl een schrijftransactie open staat.
-- Eén versieerbare SQLite-migratielijn is de bron voor schema-evolutie. `PRAGMA user_version` houdt momenteel versie 1 bij zonder een tiende domeintabel toe te voegen.
-- Nieuwe en bestaande databases worden door hetzelfde migratiepad voorbereid. De huidige PostgreSQL-reconciler en drie parallelle schema-implementaties vervallen na migratie.
+- Wacht niet op S3-, OCR- of AI-calls terwijl een schrijftransactie open staat.
+- Eén versieerbare SQLite-migratielijn is de bron voor schema-evolutie. `PRAGMA user_version` houdt momenteel versie 7 bij zonder een tiende domeintabel toe te voegen.
+- Nieuwe en bestaande databases worden door hetzelfde migratiepad voorbereid. Parallelle PostgreSQL/MySQL-schema-implementaties zijn verwijderd.
 
 SQLite is de bron van waarheid voor alle gestructureerde domeingegevens, inclusief documenttekst, analyse, bronregels, waarden en relaties. Browseropslag is geen primaire database of backup.
 
-## 4. Documenten en PDF-AI
+## 4. Documenten en Document-AI
 
 Upload:
 
 1. Browser uploadt het bestand naar de Go-API.
 2. De API genereert een objectkey zonder businessbetekenis en schrijft de originele bytes naar Garage.
 3. De API slaat het documentrecord en gekozen objectkoppelingen op in SQLite.
-4. De Go-service biedt het document aan de externe PDF-AI-service aan.
-5. Het resultaat wordt gemapt naar `extracted_text`, `translated_text` en `analysis_json`.
+4. De Go-service zet het document in de analysequeue wanneer document-AI beschikbaar is.
+5. De analyzer haalt bytes uit S3, extraheert tekst lokaal met `pdftotext` of OCR met `ocrmypdf`/Tesseract, vertaalt/analyseert via de OpenAI-compatible LLM en valideert object-ID's tegen bestaande financiële objecten.
+6. Het resultaat wordt gemapt naar `extracted_text`, `translated_text`, `analysis_json` en koppelingen in `document_financial_objects`.
 
 Download loopt via de Go-API, die de bijbehorende objectkey uit SQLite leest en het object uit Garage streamt. De browser kent geen permanente S3-toegangssleutels.
 
 SQLite en S3 delen geen transactie. Als opslag van metadata na upload mislukt, moet de applicatie het nieuwe ongekoppelde object opruimen of als te reconciliëren object registreren buiten het domeinmodel. Document ontkoppelen verwijdert geen bestand. Definitief verwijderen krijgt een expliciete flow voor metadata en objectbytes.
 
-Documentanalyse blijft beperkt achtergrondwerk in dezelfde Go-service. Het negen-tabellenmodel bevat geen analyse-statuskolom of jobtabel. De implementatie moet fouten en opnieuw analyseren begrijpelijk afhandelen zonder stilzwijgend het oude workflowmodel terug te brengen.
+Documentanalyse blijft beperkt achtergrondwerk in dezelfde Go-service. Er is een statusveld op `documents`, maar geen aparte jobtabel. Fouten zetten het document op foutstatus; batch- en selectieacties kunnen documenten opnieuw in de queue plaatsen zonder het oude workflowmodel terug te brengen.
 
 ## 5. Eenvoudige configuratie
 
@@ -106,13 +107,14 @@ Benodigde operationele instellingen:
 | `S3_BUCKET` | Documentbucket |
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY` | Server-side buckettoegang |
 | `S3_REGION`, `S3_PATH_STYLE`, `S3_USE_TLS` | Bestaand S3-clientcontract; Garage gebruikt path-style, TLS passend bij het endpoint |
-| `PDF_AI_URL` | Externe documentverwerking, zonder hardcoded LAN-adres |
+| `PDF_AI_URL`, `PDF_AI_MODEL` | OpenAI-compatible LLM voor documentvertaling en analyse |
 | `TRANSACTION_AI_URL`, `TRANSACTION_AI_MODEL` | OpenAI-compatible transactieclassificatie voor bankimport |
+| `AI_DOCS_CONFIG_PATH` | YAML-configuratie voor documentprompts, OCR-talen en tekstlimieten |
 | `AUTH_USERNAME`, `AUTH_PASSWORD` | Bestaande productieauthenticatie behouden |
 
 `HTTP_ADDR` en `WEB_DIR` kunnen vaste defaults in het app-image krijgen. `STORE_BACKEND`, `DATABASE_URL`, `MYSQL_*`, `OBJECT_BACKEND` en `STORAGE_PROFILE` verdwijnen als gebruikerskeuzes. De deployment gebruikt één bron voor instellingen; oude `config/storage.json`-waarden mogen nieuwe instellingen niet ongemerkt overschrijven. Secrets blijven buiten Git en buiten frontendresponses.
 
-De UI toont alleen noodzakelijke instellingen/status voor de vaste stack. Databaseselectie, backendvalidatie en opslagprofielwissels verdwijnen. De bestaande productieauthenticatie blijft bij frontend, API en documentdownloads van toepassing.
+De UI toont alleen noodzakelijke instellingen/status voor de vaste stack. De databasebackend staat vast; binnen `/app/data` kan wel een fysiek `.db`-bestand worden gekozen, bijvoorbeeld `hohoho.db` of later `example.db`. De bestaande productieauthenticatie blijft bij frontend, API en documentdownloads van toepassing.
 
 ## 6. Backup en herstel
 
@@ -129,32 +131,23 @@ Een complete administratie bestaat uit SQLite **en** de bijbehorende Garage-obje
 
 - Elke geslaagde backup voert `restic check` uit en herstelt de nieuwe snapshot tijdelijk. De restore-proef controleert het manifest en `PRAGMA integrity_check` op SQLite voordat de snapshot als geslaagd telt.
 
-De bestaande backup-/recovercode kan hiervoor worden versmald naar SQLite en S3. Of restic/rclone hiervoor behouden blijven wordt aan deze concrete flow getoetst; PostgreSQL/MySQL-backupbranches zijn geen onderdeel van v3.
+De backupservice en de operator-CLI gebruiken uitsluitend SQLite en S3. `restic` en `rclone` zijn onderdeel van het runtime-image; PostgreSQL/MySQL-backupbranches zijn verwijderd.
 
-## 7. Concrete wijzigingen en volgorde
+## 7. Gerealiseerde wijzigingen
 
-| Huidig | V3-werk |
+| Onderdeel | Actieve v3-implementatie |
 | --- | --- |
-| `internal/store/` met drie SQL-backends | Eén SQLite-implementatie van het negen-tabellenmodel; backendselectie en serverdrivers vervangen |
-| `internal/config/manager.go` | Profielregels verwijderen; huidige regels blokkeren SQLite+S3 (`local` vereist filesystem, `server`/`central` vereisen PostgreSQL/MySQL) |
-| `cmd/api/main.go` | SQLite en S3 rechtstreeks openen; bestaande HTTP-, shutdown- en PDF-AI-werking behouden |
-| `internal/objectstore/` | S3/Garage als enige operationele documentstore; filesystem-runtime vervangen |
-| `compose.yml` | PostgreSQL/MySQL-services vervangen door app+Garage, met persistente volumes en readiness/bootstrap |
-| `Dockerfile` | Klein runtime-image zonder PostgreSQL/MariaDB-tooling |
-| `web/src/main.js` | Objectgerichte UI en configuratiescherm voor de vaste stack |
+| `internal/store/` | Eén SQLite-implementatie van het negen-tabellenmodel |
+| `internal/config/` | Alleen environment- en runtimeconfiguratie voor SQLite/S3 |
+| `cmd/api/main.go` en `cmd/api/documentai.go` | SQLite en S3 openen; HTTP, shutdown, lokale OCR/document-AI beheren |
+| `internal/objectstore/` | S3/Garage als enige documentstore |
+| `compose.yml` | Eén app-service met persistent SQLite-volume, configuratiemounts en S3/Garage-configuratie via environment |
+| `Dockerfile` | Runtime-image met SQLite, backuptools en documentverwerkingstools; zonder PostgreSQL/MariaDB-tooling |
+| `web/src/main.js` | Objectgerichte UI, documenten, import en configuratie voor de vaste stack |
 | `internal/systembackup` | Consistente SQLite/S3-snapshots, retentie, validatie en herstel |
-| `go.mod`, tests en scripts | Niet meer benodigde drivers/dependencies verwijderen; SQLite-, S3- en end-to-endchecks behouden |
+| `go.mod`, tests en scripts | Alleen SQLite-, S3- en actieve end-to-endchecks |
 
-Uitvoeringsvolgorde:
-
-1. Leg de bestaande code vast; ontwikkel de nieuwe structuur op `v3-simplification`.
-2. Bouw het negen-tabellenmodel, schemaversiebeheer en nieuwe repositorycontracten op een lege SQLite-database, zonder oude seeds.
-3. Bouw objecten, waarden en relaties; daarna transacties/classificatie, configureerbare bankimport en documenten/PDF-AI.
-4. Versmal configuratie, startup, backup en UI; bouw de app+Garage Compose-deployment met een eigen lege HoHoHo-bucket.
-5. Verifieer de volledige browserflow, import, waarden, relaties, upload/download, PDF-AI en herstel met nieuwe testgegevens.
-6. Deploy met een lege administratie. Ruim vervangen PostgreSQL-/MySQL-implementaties, filesystem-runtime, profielkeuzes, dependencies en scripts op zodra de nieuwe flows werken. Verwijder oude HoHoHo-data gericht als aparte uitvoeringsstap en stem repository-instructies op v3 af.
-
-De technische omschakeling en nieuwe domeinfuncties krijgen afzonderlijke controles. Code vastleggen of een branch aanmaken verwijdert geen databases of S3-objecten.
+V3 verwijdert geen bestaande databases of S3-objecten automatisch. Oude YoHoFa-data verwijderen blijft een aparte, expliciete uitvoeringsstap.
 
 ## 8. Acceptatiecriteria
 
@@ -171,4 +164,4 @@ De technische omschakeling en nieuwe domeinfuncties krijgen afzonderlijke contro
 
 `go build ./...` en `go test ./...` controleren de v3-runtime. `scripts/check-local.sh` start de echte API op een geïsoleerde tijdelijke database, controleert objecten/waarden/relaties en herstart/persistentie. De frontend wordt met Vite gebouwd. Productie-image en HTTP-startup worden afzonderlijk gecontroleerd.
 
-De actieve `/healthz` meet SQLite; `/readyz` controleert ook S3. Ontbrekende/onbereikbare S3 maakt readiness 503, maar blokkeert de huidige objectbasis niet. Documentupload, analyse en herstel zijn nog niet beschikbaar als v3-routes.
+De actieve `/healthz` meet SQLite; `/readyz` controleert ook S3. Ontbrekende/onbereikbare S3 maakt readiness 503 en blokkeert documentupload. Documentupload, analyse, download, import en gepland herstel zijn actieve v3-routes.

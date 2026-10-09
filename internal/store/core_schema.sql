@@ -1,7 +1,7 @@
 -- HoHoHo target schema v3 — de eenvoudige kern (SQLite)
 -- Negen tabellen: financiële objecten, transacties, documenten, koppelingen,
 -- waardehistorie, bankimportprofielen, ruwe importregels en objectrelaties.
--- Objecttypes: asset, debt, reserve, expense; validatie in de applicatie.
+-- Objecttypes: asset, debt, reserve, expense, financial; validatie in de applicatie.
 -- Eén deployment/database vertegenwoordigt één huishouden.
 -- SQLite: INTEGER PRIMARY KEY voor IDs, TEXT voor ISO-datums en JSON.
 -- Canonieke v3-schema-initialisatie, ingebed in de SQLite-store.

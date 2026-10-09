@@ -22,7 +22,14 @@ const maxCoreDocumentSize = 25 << 20
 // interface are separate concerns: upload works fully without any analyzer,
 // and an analyzer only receives a read-only view of the stored document.
 type CoreDocumentAnalyzer interface {
-	AnalyzeDocument(ctx context.Context, document store.CoreDocument) (extractedText string, translatedText string, analysisJSON string, err error)
+	AnalyzeDocument(ctx context.Context, document store.CoreDocument) (CoreDocumentAnalysisResult, error)
+}
+
+type CoreDocumentAnalysisResult struct {
+	ExtractedText      string
+	TranslatedText     string
+	AnalysisJSON       string
+	FinancialObjectIDs []int64
 }
 
 func registerCoreDocumentRoutes(mux *http.ServeMux, deps CoreDependencies) {
@@ -88,7 +95,64 @@ func registerCoreDocumentRoutes(mux *http.ServeMux, deps CoreDependencies) {
 			return
 		}
 		item, err := deps.Store.CoreDocument(r.Context(), document.ID)
+		if err == nil {
+			startCoreDocumentAnalysis(deps, item)
+		}
 		coreRespond(w, r, deps, http.StatusCreated, item, err)
+	})
+	mux.HandleFunc("POST /api/v1/documents/analyze-batch", func(w http.ResponseWriter, r *http.Request) {
+		if deps.DocumentAnalyzer == nil || deps.DocumentAnalysisQueue == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Documentanalyse is niet geconfigureerd"})
+			return
+		}
+		items, err := deps.Store.CoreDocuments(r.Context())
+		if err != nil {
+			coreRespond(w, r, deps, 0, nil, err)
+			return
+		}
+		batch := make([]store.CoreDocument, 0, len(items))
+		for _, item := range items {
+			if item.Status == "I" || item.Status == "F" {
+				batch = append(batch, item)
+			}
+		}
+		go func(documents []store.CoreDocument) {
+			for _, document := range documents {
+				deps.DocumentAnalysisQueue <- document
+			}
+		}(batch)
+		writeJSON(w, http.StatusAccepted, map[string]int{"queued": len(batch)})
+	})
+	mux.HandleFunc("POST /api/v1/documents/analyze-selected", func(w http.ResponseWriter, r *http.Request) {
+		if deps.DocumentAnalyzer == nil || deps.DocumentAnalysisQueue == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "Documentanalyse is niet geconfigureerd"})
+			return
+		}
+		var input struct {
+			DocumentIDs []int64 `json:"documentIds"`
+		}
+		if !coreDecode(w, r, &input) {
+			return
+		}
+		queued := 0
+		seen := map[int64]bool{}
+		for _, id := range input.DocumentIDs {
+			if id <= 0 || seen[id] {
+				continue
+			}
+			seen[id] = true
+			document, err := deps.Store.CoreDocument(r.Context(), id)
+			if err != nil {
+				if errors.Is(err, store.ErrCoreNotFound) {
+					continue
+				}
+				coreRespond(w, r, deps, 0, nil, err)
+				return
+			}
+			startCoreDocumentAnalysis(deps, document)
+			queued++
+		}
+		writeJSON(w, http.StatusAccepted, map[string]int{"queued": queued})
 	})
 	mux.HandleFunc("GET /api/v1/documents/{id}", coreObjectHandler(func(w http.ResponseWriter, r *http.Request, id int64) {
 		item, err := deps.Store.CoreDocument(r.Context(), id)
@@ -131,7 +195,6 @@ func registerCoreDocumentRoutes(mux *http.ServeMux, deps CoreDependencies) {
 			disposition = "inline"
 		}
 		w.Header().Set("Content-Type", document.MIMEType)
-		w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Length", strconv.FormatInt(document.SizeBytes, 10))
 		w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": document.Filename}))
@@ -179,7 +242,7 @@ func registerCoreDocumentRoutes(mux *http.ServeMux, deps CoreDependencies) {
 		}
 		analysisCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Minute)
 		defer cancel()
-		extractedText, translatedText, analysisJSON, err := analyzer.AnalyzeDocument(analysisCtx, document)
+		result, err := analyzer.AnalyzeDocument(analysisCtx, document)
 		if err != nil {
 			if statusErr := deps.Store.UpdateCoreDocumentStatus(context.WithoutCancel(r.Context()), id, "F"); statusErr != nil {
 				deps.Logger.Error("documentstatus opslaan mislukt", "document_id", id, "error", statusErr)
@@ -188,7 +251,11 @@ func registerCoreDocumentRoutes(mux *http.ServeMux, deps CoreDependencies) {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "Documentanalyse is mislukt"})
 			return
 		}
-		if err := deps.Store.UpdateCoreDocumentContent(context.WithoutCancel(r.Context()), id, extractedText, translatedText, analysisJSON); err != nil {
+		if err := deps.Store.UpdateCoreDocumentContent(context.WithoutCancel(r.Context()), id, result.ExtractedText, result.TranslatedText, result.AnalysisJSON); err != nil {
+			coreRespond(w, r, deps, 0, nil, err)
+			return
+		}
+		if err := linkAnalyzedDocumentObjects(context.WithoutCancel(r.Context()), deps, id, result.FinancialObjectIDs); err != nil {
 			coreRespond(w, r, deps, 0, nil, err)
 			return
 		}
@@ -214,4 +281,27 @@ func startCoreDocumentAnalysis(deps CoreDependencies, document store.CoreDocumen
 	default:
 		deps.Logger.Warn("wachtrij voor documentanalyse is vol; analyse overgeslagen", "document_id", document.ID)
 	}
+}
+
+func linkAnalyzedDocumentObjects(ctx context.Context, deps CoreDependencies, documentID int64, objectIDs []int64) error {
+	if len(objectIDs) == 0 {
+		return nil
+	}
+	seen := map[int64]bool{}
+	for _, objectID := range objectIDs {
+		if objectID <= 0 || seen[objectID] {
+			continue
+		}
+		seen[objectID] = true
+		if _, err := deps.Store.FinancialObject(ctx, objectID); err != nil {
+			if errors.Is(err, store.ErrCoreNotFound) {
+				continue
+			}
+			return err
+		}
+		if err := deps.Store.LinkCoreDocument(ctx, documentID, objectID); err != nil && !errors.Is(err, store.ErrCoreConflict) {
+			return err
+		}
+	}
+	return nil
 }

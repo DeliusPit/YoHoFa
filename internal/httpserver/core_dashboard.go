@@ -8,7 +8,7 @@ import (
 )
 
 func registerCoreDashboardRoutes(mux *http.ServeMux, deps CoreDependencies) {
-	mux.HandleFunc("GET /api/v1/dashboard", func(w http.ResponseWriter, r *http.Request) {
+	period := func(w http.ResponseWriter, r *http.Request, load func(int, int) (any, error)) {
 		year, month := 0, 0
 		for key, destination := range map[string]*int{"year": &year, "month": &month} {
 			if value := r.URL.Query().Get(key); value != "" {
@@ -20,7 +20,13 @@ func registerCoreDashboardRoutes(mux *http.ServeMux, deps CoreDependencies) {
 				*destination = parsed
 			}
 		}
-		item, err := deps.Store.Dashboard(r.Context(), year, month)
+		item, err := load(year, month)
 		coreRespond(w, r, deps, http.StatusOK, item, err)
+	}
+	mux.HandleFunc("GET /api/v1/dashboard", func(w http.ResponseWriter, r *http.Request) {
+		period(w, r, func(year, month int) (any, error) { return deps.Store.Dashboard(r.Context(), year, month) })
+	})
+	mux.HandleFunc("GET /api/v1/budget", func(w http.ResponseWriter, r *http.Request) {
+		period(w, r, func(year, month int) (any, error) { return deps.Store.Budget(r.Context(), year, month) })
 	})
 }

@@ -28,14 +28,19 @@ type Runtime struct {
 	S3PathStyle        bool
 	S3CreateBucket     bool
 	PDFAIURL           string
+	PDFAIModel         string
 	TransactionAIURL   string
 	TransactionAIModel string
 	ConfigPath         string
 	BackupWorkRoot     string
 	BankConfigDir      string
+	TranslationDir     string
+	AIDocsConfigPath   string
+	Language           string
 }
 
 type RuntimeUpdate struct {
+	DatabasePath       string  `json:"databasePath"`
 	S3Endpoint         string  `json:"s3Endpoint"`
 	S3AccessKey        *string `json:"s3AccessKey,omitempty"`
 	S3SecretKey        *string `json:"s3SecretKey,omitempty"`
@@ -45,12 +50,15 @@ type RuntimeUpdate struct {
 	S3PathStyle        bool    `json:"s3PathStyle"`
 	S3CreateBucket     bool    `json:"s3CreateBucket"`
 	PDFAIURL           string  `json:"pdfAiUrl"`
+	PDFAIModel         string  `json:"pdfAiModel"`
 	TransactionAIURL   string  `json:"transactionAiUrl"`
 	TransactionAIModel string  `json:"transactionAiModel"`
+	Language           string  `json:"language"`
 }
 
 type runtimeDisk struct {
 	Version            int    `json:"version"`
+	DatabasePath       string `json:"databasePath"`
 	S3Endpoint         string `json:"s3Endpoint"`
 	S3AccessKey        string `json:"s3AccessKey"`
 	S3SecretKey        string `json:"s3SecretKey"`
@@ -60,8 +68,10 @@ type runtimeDisk struct {
 	S3PathStyle        bool   `json:"s3PathStyle"`
 	S3CreateBucket     bool   `json:"s3CreateBucket"`
 	PDFAIURL           string `json:"pdfAiUrl"`
+	PDFAIModel         string `json:"pdfAiModel"`
 	TransactionAIURL   string `json:"transactionAiUrl"`
 	TransactionAIModel string `json:"transactionAiModel"`
+	Language           string `json:"language"`
 }
 
 func RuntimeFromEnv() Runtime {
@@ -74,9 +84,9 @@ func RuntimeFromEnv() Runtime {
 		S3Endpoint:   env("S3_ENDPOINT", ""), S3AccessKey: env("S3_ACCESS_KEY", ""), S3SecretKey: env("S3_SECRET_KEY", ""),
 		S3Bucket: env("S3_BUCKET", "hohoho-v3-documents"), S3Region: env("S3_REGION", "garage"),
 		S3UseTLS: boolEnv("S3_USE_TLS", false), S3PathStyle: boolEnv("S3_PATH_STYLE", true),
-		S3CreateBucket: boolEnv("S3_CREATE_BUCKET", false), PDFAIURL: env("PDF_AI_URL", ""), TransactionAIURL: env("TRANSACTION_AI_URL", ""), TransactionAIModel: env("TRANSACTION_AI_MODEL", "Qwen3.6-35B-A3B-Q4_K_M"),
+		S3CreateBucket: boolEnv("S3_CREATE_BUCKET", false), PDFAIURL: env("PDF_AI_URL", ""), PDFAIModel: env("PDF_AI_MODEL", "Qwen3.8-Flash-Next-UD-Q4_K_XL"), TransactionAIURL: env("TRANSACTION_AI_URL", ""), TransactionAIModel: env("TRANSACTION_AI_MODEL", "Qwen3.6-35B-A3B-Q4_K_M"),
 		ConfigPath: env("RUNTIME_CONFIG_PATH", "data/v3/runtime.json"), BackupWorkRoot: env("BACKUP_WORK_ROOT", "data/v3/backup-work"),
-		BankConfigDir: env("BANK_CONFIG_DIR", "config/banks"),
+		BankConfigDir: env("BANK_CONFIG_DIR", "config/banks"), TranslationDir: env("TRANSLATION_DIR", "config/translations"), AIDocsConfigPath: env("AI_DOCS_CONFIG_PATH", "config/ai-docs.yaml"), Language: env("APP_LANGUAGE", "nl"),
 	}
 	if disk, ok := readRuntimeDisk(cfg.ConfigPath); ok {
 		applyRuntimeDisk(&cfg, disk)
@@ -96,7 +106,7 @@ func (cfg Runtime) Validate() error {
 }
 
 func RuntimeUpdateFromCurrent(cfg Runtime) RuntimeUpdate {
-	return RuntimeUpdate{S3Endpoint: cfg.S3Endpoint, S3Bucket: cfg.S3Bucket, S3UseTLS: cfg.S3UseTLS, S3Region: cfg.S3Region, S3PathStyle: cfg.S3PathStyle, S3CreateBucket: cfg.S3CreateBucket, PDFAIURL: cfg.PDFAIURL, TransactionAIURL: cfg.TransactionAIURL, TransactionAIModel: cfg.TransactionAIModel}
+	return RuntimeUpdate{DatabasePath: cfg.DatabasePath, S3Endpoint: cfg.S3Endpoint, S3Bucket: cfg.S3Bucket, S3UseTLS: cfg.S3UseTLS, S3Region: cfg.S3Region, S3PathStyle: cfg.S3PathStyle, S3CreateBucket: cfg.S3CreateBucket, PDFAIURL: cfg.PDFAIURL, PDFAIModel: cfg.PDFAIModel, TransactionAIURL: cfg.TransactionAIURL, TransactionAIModel: cfg.TransactionAIModel, Language: cfg.Language}
 }
 
 func SavedRuntime(path string, current Runtime) (Runtime, bool) {
@@ -122,7 +132,19 @@ func SaveRuntimeUpdate(path string, current Runtime, input RuntimeUpdate) error 
 	if model == "" {
 		model = current.TransactionAIModel
 	}
-	disk := runtimeDisk{Version: 1, S3Endpoint: input.S3Endpoint, S3AccessKey: accessKey, S3SecretKey: secretKey, S3Bucket: input.S3Bucket, S3UseTLS: input.S3UseTLS, S3Region: input.S3Region, S3PathStyle: input.S3PathStyle, S3CreateBucket: input.S3CreateBucket, PDFAIURL: input.PDFAIURL, TransactionAIURL: input.TransactionAIURL, TransactionAIModel: model}
+	pdfModel := input.PDFAIModel
+	if pdfModel == "" {
+		pdfModel = current.PDFAIModel
+	}
+	language := input.Language
+	if language == "" {
+		language = current.Language
+	}
+	databasePath := input.DatabasePath
+	if databasePath == "" {
+		databasePath = current.DatabasePath
+	}
+	disk := runtimeDisk{Version: 1, DatabasePath: databasePath, S3Endpoint: input.S3Endpoint, S3AccessKey: accessKey, S3SecretKey: secretKey, S3Bucket: input.S3Bucket, S3UseTLS: input.S3UseTLS, S3Region: input.S3Region, S3PathStyle: input.S3PathStyle, S3CreateBucket: input.S3CreateBucket, PDFAIURL: input.PDFAIURL, PDFAIModel: pdfModel, TransactionAIURL: input.TransactionAIURL, TransactionAIModel: model, Language: language}
 	data, err := json.MarshalIndent(disk, "", "  ")
 	if err != nil {
 		return err
@@ -164,6 +186,9 @@ func readRuntimeDisk(path string) (runtimeDisk, bool) {
 }
 
 func applyRuntimeDisk(cfg *Runtime, disk runtimeDisk) {
+	if disk.DatabasePath != "" {
+		cfg.DatabasePath = disk.DatabasePath
+	}
 	cfg.S3Endpoint = disk.S3Endpoint
 	cfg.S3AccessKey = disk.S3AccessKey
 	cfg.S3SecretKey = disk.S3SecretKey
@@ -173,9 +198,15 @@ func applyRuntimeDisk(cfg *Runtime, disk runtimeDisk) {
 	cfg.S3PathStyle = disk.S3PathStyle
 	cfg.S3CreateBucket = disk.S3CreateBucket
 	cfg.PDFAIURL = disk.PDFAIURL
+	if disk.PDFAIModel != "" {
+		cfg.PDFAIModel = disk.PDFAIModel
+	}
 	cfg.TransactionAIURL = disk.TransactionAIURL
 	if disk.TransactionAIModel != "" {
 		cfg.TransactionAIModel = disk.TransactionAIModel
+	}
+	if disk.Language != "" {
+		cfg.Language = disk.Language
 	}
 }
 
@@ -207,11 +238,17 @@ func applyRuntimeEnv(cfg *Runtime) {
 	if value := os.Getenv("PDF_AI_URL"); value != "" {
 		cfg.PDFAIURL = value
 	}
+	if value := os.Getenv("PDF_AI_MODEL"); value != "" {
+		cfg.PDFAIModel = value
+	}
 	if value := os.Getenv("TRANSACTION_AI_URL"); value != "" {
 		cfg.TransactionAIURL = value
 	}
 	if value := os.Getenv("TRANSACTION_AI_MODEL"); value != "" {
 		cfg.TransactionAIModel = value
+	}
+	if value := os.Getenv("APP_LANGUAGE"); value != "" {
+		cfg.Language = value
 	}
 }
 

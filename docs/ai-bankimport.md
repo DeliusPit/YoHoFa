@@ -1,8 +1,8 @@
 # AI bij bankimport
 
-De actieve v3-bankimport gebruikt de ingestelde `TRANSACTION_AI_URL` tijdens de definitieve CSV-import. Deze URL moet wijzen naar een OpenAI-compatible chat-completions endpoint, bijvoorbeeld `http://192.168.178.215:8080/v1/chat/completions`. Na het invullen van deze URL kan de applicatie de beschikbare modellen ophalen via het bijbehorende `/v1/models` endpoint. Het gekozen model komt uit `TRANSACTION_AI_MODEL` of uit de applicatieconfiguratie. Preview blijft lokaal en deterministisch: de preview parseert alleen CSV via de gekozen bankconfiguratie.
+De actieve v3-bankimport slaat een definitieve CSV-import eerst op als niet-geclassificeerde transacties. De afzonderlijke actie `POST /api/v1/transactions/classify-ai` gebruikt daarna de ingestelde `TRANSACTION_AI_URL`. Deze URL moet wijzen naar een OpenAI-compatible chat-completions endpoint, bijvoorbeeld `http://ai.example.local:8080/v1/chat/completions`. Na het invullen van deze URL kan de applicatie de beschikbare modellen ophalen via het bijbehorende `/v1/models` endpoint. Het gekozen model komt uit `TRANSACTION_AI_MODEL` of uit de applicatieconfiguratie. Preview blijft lokaal en deterministisch: de preview parseert alleen CSV via de gekozen bankconfiguratie.
 
-Bij definitieve import stuurt de API de genormaliseerde CSV-regels en de bestaande financiële objecten in batches naar de transactie-AI. De AI mag alleen bestaande financiële objecten teruggeven; de app maakt geen categorieen/objecten aan op basis van AI-output.
+Bij classificatie stuurt de API bestaande, niet-geclassificeerde transacties en financiële objecten in batches naar de transactie-AI. De AI mag alleen bestaande financiële objecten teruggeven; de app maakt geen categorieen/objecten aan op basis van AI-output.
 
 De batches zijn klein gehouden zodat lokale modellen en `llama-swap` niet meteen grote prompts hoeven te verwerken. De chat-completions request gebruikt `stream:false` en `max_tokens:2048`.
 
@@ -28,7 +28,7 @@ De server doet een `POST` naar `TRANSACTION_AI_URL` met JSON zoals:
 }
 ```
 
-De user-prompt bevat de bankconfiguratie, alle financiële objecten en alle te importeren CSV-regels. Financiële objecten zijn de categorieen uit de v3-kern; `objectType` is een van `asset`, `debt`, `expense` of `reserve`.
+De user-prompt bevat de bankconfiguratie, alle financiële objecten en alle te importeren CSV-regels. Financiële objecten zijn de categorieen uit de v3-kern; `objectType` is een van `asset`, `debt`, `expense`, `reserve` of `financial`.
 
 ## Response
 
