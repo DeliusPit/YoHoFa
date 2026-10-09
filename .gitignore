@@ -1,16 +1,32 @@
+# Environment / secrets
 .env
+
+# Build output
 bin/
 dist/
 node_modules/
-web/node_modules/
-web/dist/
+
+# Logs
 *.log
+
+# Runtime databases
 *.db
 *.db-shm
 *.db-wal
-data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Runtime data
+data/*
+!data/v3/
+data/v3/*
+!data/v3/example*
+
+# Local installation
 .install/
-config/garage/
+
+# Configuration
 config/*
 !config/.gitkeep
 !config/.env.example
@@ -19,3 +35,9 @@ config/*
 !config/banks/*.yaml
 !config/translations/
 !config/translations/*.json
+
+# OS/editor rubbish
+.DS_Store
+Thumbs.db
+*.swp
+*~
