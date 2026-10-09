@@ -83,14 +83,16 @@ De runtime-image bevat de documentverwerkingssoftware die nodig is voor lokale t
 
 ## Update
 
-Een update is dezelfde flow als installatie:
+Voor een bestaande installatie gebruik je de upgradeflow zonder nieuwe vragenlijst:
 
 ```sh
 git pull
-./setup.sh
+./upgrade.sh
 ```
 
-Maak vóór een upgrade een geslaagde backup. De SQLite-migraties gebruiken `PRAGMA user_version`; de huidige applicatie kan een database met een nieuwere schema-versie niet openen. Oude v2-databases worden niet geconverteerd of automatisch verwijderd.
+`upgrade.sh` gebruikt de bestaande `.env` en `.install/compose.garage.yml`, bouwt de container opnieuw, start de bestaande services en controleert `/healthz` en `/readyz`. Maak vóór een upgrade een geslaagde backup. De SQLite-migraties gebruiken `PRAGMA user_version`; de huidige applicatie kan een database met een nieuwere schema-versie niet openen. Oude v2-databases worden niet geconverteerd of automatisch verwijderd.
+
+Gebruik `./setup.sh` alleen voor nieuwe installaties of wanneer je de basisconfiguratie opnieuw wilt genereren.
 
 ## Beschikbaarheid en beheer
 
