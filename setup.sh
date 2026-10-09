@@ -91,6 +91,15 @@ write_var() {
   printf '\n' >> .install/install.env
 }
 
+validate_s3_bucket() {
+  bucket=$1
+  length=${#bucket}
+  [ "$length" -ge 3 ] && [ "$length" -le 63 ] || die "S3 bucket moet 3 tot 63 tekens lang zijn"
+  printf '%s' "$bucket" | grep -Eq '^[a-z0-9][a-z0-9.-]*[a-z0-9]$' || die "S3 bucket mag alleen kleine letters, cijfers, punten en streepjes bevatten en moet met letter/cijfer beginnen en eindigen"
+  printf '%s' "$bucket" | grep -Eq '\.\.' && die "S3 bucket mag geen opeenvolgende punten bevatten"
+  printf '%s' "$bucket" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' && die "S3 bucket mag niet op een IP-adres lijken"
+}
+
 require_tools() {
   command_exists docker || die "Docker is niet geinstalleerd of staat niet in PATH"
   docker compose version >/dev/null 2>&1 || die "Docker Compose plugin is niet beschikbaar; installeer docker compose"
@@ -120,6 +129,7 @@ AUTH_PASSWORD=$(prompt_secret "Wachtwoord voor YoHoFa" "$(get_env AUTH_PASSWORD)
 
 S3_BUCKET=$(prompt_default "S3 bucket" "$(get_env S3_BUCKET)")
 [ -n "$S3_BUCKET" ] || S3_BUCKET=hohoho-v3-documents
+validate_s3_bucket "$S3_BUCKET"
 
 if [ "$STORAGE_MODE" = "local-garage" ]; then
   S3_ENDPOINT=http://garage:3900
@@ -265,19 +275,19 @@ GARAGECOMPOSE
   docker compose $COMPOSE_FILES up -d garage
   info "Garage initialiseren..."
   tries=0
-  until docker compose $COMPOSE_FILES exec -T garage garage status >/dev/null 2>&1; do
+  until docker compose $COMPOSE_FILES exec -T garage /garage status >/dev/null 2>&1; do
     tries=$((tries + 1))
     [ "$tries" -lt 30 ] || die "Garage reageert niet op tijd"
     sleep 1
   done
-  NODE_ID=$(docker compose $COMPOSE_FILES exec -T garage garage node id 2>/dev/null | sed -n 's/.*\([0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].*\)/\1/p' | head -n 1)
+  NODE_ID=$(docker compose $COMPOSE_FILES exec -T garage /garage node id 2>/dev/null | sed -n 's/.*\([0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].*\)/\1/p' | head -n 1)
   if [ -n "$NODE_ID" ]; then
-    docker compose $COMPOSE_FILES exec -T garage garage layout assign -z dc1 -c 1 "$NODE_ID" >/dev/null 2>&1 || true
-    docker compose $COMPOSE_FILES exec -T garage garage layout apply --version 1 >/dev/null 2>&1 || true
+    docker compose $COMPOSE_FILES exec -T garage /garage layout assign -z dc1 -c 1 "$NODE_ID" >/dev/null 2>&1 || true
+    docker compose $COMPOSE_FILES exec -T garage /garage layout apply --version 1 >/dev/null 2>&1 || true
   fi
-  docker compose $COMPOSE_FILES exec -T garage garage bucket create "$S3_BUCKET" >/dev/null 2>&1 || true
-  docker compose $COMPOSE_FILES exec -T garage garage key import "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --name hohoho >/dev/null 2>&1 || true
-  docker compose $COMPOSE_FILES exec -T garage garage bucket allow --read --write --owner "$S3_BUCKET" --key "$S3_ACCESS_KEY" >/dev/null 2>&1 || true
+  docker compose $COMPOSE_FILES exec -T garage /garage bucket create "$S3_BUCKET" >/dev/null 2>&1 || true
+  docker compose $COMPOSE_FILES exec -T garage /garage key import --yes -n yohofa "$S3_ACCESS_KEY" "$S3_SECRET_KEY" >/dev/null 2>&1 || true
+  docker compose $COMPOSE_FILES exec -T garage /garage bucket allow --read --write --owner "$S3_BUCKET" --key "$S3_ACCESS_KEY" >/dev/null 2>&1 || true
 fi
 
 info "YoHoFa bouwen en starten..."
