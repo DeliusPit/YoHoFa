@@ -101,6 +101,14 @@ type saveAIDocsConfigInput struct {
 }
 
 func registerCoreConfigurationRoutes(mux *http.ServeMux, deps CoreDependencies) {
+	mux.HandleFunc("POST /api/v1/system/restart", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			os.Exit(0)
+		}()
+	})
+
 	mux.HandleFunc("GET /api/v1/system/configuration", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()

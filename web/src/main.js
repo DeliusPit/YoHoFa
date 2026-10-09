@@ -332,7 +332,7 @@ function renderApplicationConfiguration(cfg) {
       ${cfg.restartRequired ? '<p class="config-notice">Configuratie opgeslagen. Herstart de applicatie om gewijzigde serverkoppelingen actief te maken.</p>' : ''}
       <form id="application-config-form" class="configuration-form">
         ${languages.length ? `<label>${escapeHtml(t('config.application.language', 'Taal'))} <select name="language">${languageOptions}</select></label>` : ''}
-        <div class="core-actions"><button type="submit">${escapeHtml(t('config.application.save', 'Applicatieconfiguratie opslaan'))}</button></div>
+        <div class="core-actions"><button type="submit">${escapeHtml(t('config.application.save', 'Applicatieconfiguratie opslaan'))}</button><button type="button" class="secondary" data-action="restart-application">Applicatie herstarten</button></div>
       </form>
     </section>`;
 }
@@ -1306,6 +1306,19 @@ app.addEventListener('click', async (event) => {
   if (action === 'configuration-section') {
     configurationFocus = button.dataset.section;
     render();
+    return;
+  }
+  if (action === 'restart-application') {
+    if (!confirm('Applicatie nu herstarten? De pagina is kort niet bereikbaar.')) return;
+    button.disabled = true;
+    try {
+      await api('/system/restart', { method: 'POST' });
+      message = 'Applicatie wordt herstart. Vernieuw de pagina over enkele seconden.';
+      render();
+    } catch (error) {
+      showError(error);
+      button.disabled = false;
+    }
     return;
   }
   if (action === 'load-transaction-ai-models') {
