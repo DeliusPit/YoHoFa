@@ -91,13 +91,24 @@ write_var() {
   printf '\n' >> .install/install.env
 }
 
-validate_s3_bucket() {
+is_valid_s3_bucket() {
   bucket=$1
   length=${#bucket}
-  [ "$length" -ge 3 ] && [ "$length" -le 63 ] || die "S3 bucket moet 3 tot 63 tekens lang zijn"
-  printf '%s' "$bucket" | grep -Eq '^[a-z0-9][a-z0-9.-]*[a-z0-9]$' || die "S3 bucket mag alleen kleine letters, cijfers, punten en streepjes bevatten en moet met letter/cijfer beginnen en eindigen"
-  printf '%s' "$bucket" | grep -Eq '\.\.' && die "S3 bucket mag geen opeenvolgende punten bevatten"
-  printf '%s' "$bucket" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' && die "S3 bucket mag niet op een IP-adres lijken"
+  [ "$length" -ge 3 ] && [ "$length" -le 63 ] || return 1
+  if ! printf '%s' "$bucket" | grep -Eq '^[a-z0-9][a-z0-9.-]*[a-z0-9]$'; then
+    return 1
+  fi
+  if printf '%s' "$bucket" | grep -Eq '\.\.'; then
+    return 1
+  fi
+  if printf '%s' "$bucket" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+    return 1
+  fi
+  return 0
+}
+
+validate_s3_bucket() {
+  is_valid_s3_bucket "$1" || die "S3 bucket moet 3-63 tekens zijn, alleen kleine letters/cijfers/punten/streepjes bevatten, met letter/cijfer beginnen en eindigen, en geen IP-adres zijn"
 }
 
 require_tools() {
@@ -128,7 +139,9 @@ AUTH_PASSWORD=$(prompt_secret "Wachtwoord voor YoHoFa" "$(get_env AUTH_PASSWORD)
 [ -n "$AUTH_PASSWORD" ] || die "AUTH_PASSWORD is verplicht"
 
 default_bucket=$(get_env S3_BUCKET)
-[ -n "$default_bucket" ] || default_bucket=yohofa-docs
+if [ -z "$default_bucket" ] || ! is_valid_s3_bucket "$default_bucket"; then
+  default_bucket=yohofa-docs
+fi
 S3_BUCKET=$(prompt_default "S3 bucket" "$default_bucket")
 validate_s3_bucket "$S3_BUCKET"
 
