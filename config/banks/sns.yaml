@@ -1,0 +1,20 @@
+bank:
+  name: "SNS"
+
+source:
+  format: csv
+  delimiter: ";"
+  encoding: utf-8
+  quote: '"'
+  header: true
+
+mapping:
+  transaction_date: Datum
+  amount_cents: Bedrag
+  description: Omschrijving
+  counterparty: Naam tegenpartij
+
+formats:
+  transaction_date: "02-01-2006"
+  decimal_separator: ","
+  thousands_separator: "."

@@ -1,0 +1,20 @@
+bank:
+  name: "Knab"
+
+source:
+  format: csv
+  delimiter: ";"
+  encoding: utf-8
+  quote: '"'
+  header: true
+
+mapping:
+  transaction_date: Boekdatum
+  amount_cents: Bedrag
+  description: Omschrijving
+  counterparty: Tegenrekening naam
+
+formats:
+  transaction_date: "02-01-2006"
+  decimal_separator: ","
+  thousands_separator: "."

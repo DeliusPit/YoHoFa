@@ -1,0 +1,20 @@
+bank:
+  name: "ING"
+
+source:
+  format: csv
+  delimiter: ";"
+  encoding: utf-8
+  quote: '"'
+  header: true
+
+mapping:
+  transaction_date: Datum
+  amount_cents: Bedrag (EUR)
+  description: Mededelingen
+  counterparty: Naam / Omschrijving
+
+formats:
+  transaction_date: "20060102"
+  decimal_separator: ","
+  thousands_separator: "."

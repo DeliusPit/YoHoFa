@@ -1,0 +1,20 @@
+bank:
+  name: "Revolut"
+
+source:
+  format: csv
+  delimiter: ","
+  encoding: utf-8
+  quote: '"'
+  header: true
+
+mapping:
+  transaction_date: Completed Date
+  amount_cents: Amount
+  description: Description
+  counterparty: Description
+
+formats:
+  transaction_date: "2006-01-02"
+  decimal_separator: "."
+  thousands_separator: ","

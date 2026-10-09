@@ -5,6 +5,8 @@ source:
   format: csv
   delimiter: ";"
   encoding: utf-8
+  quote: '"'
+  header: true
 
 mapping:
   transaction_date: Datum

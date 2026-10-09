@@ -1,0 +1,27 @@
+bank:
+  name: "Rabobank"
+
+source:
+  format: csv
+  delimiter: ","
+  encoding: utf-8
+  quote: '"'
+  header: false
+
+columns:
+  transaction_date: 4
+  amount: 6
+  counterparty: 2
+  counterparty_account: 1
+  description: 19
+
+mapping:
+  transaction_date: transaction_date
+  amount_cents: amount
+  description: description
+  counterparty: counterparty
+
+formats:
+  transaction_date: "2006-01-02"
+  decimal_separator: ","
+  thousands_separator: "."
