@@ -64,7 +64,7 @@ De standaardinstallatie start YoHoFa met een lokale Garage/S3-container. Een rev
    S3_ENDPOINT=
    S3_ACCESS_KEY=
    S3_SECRET_KEY=
-   S3_BUCKET=hohoho-v3-documents
+   S3_BUCKET=yohofa-docs
    ```
 
    Voeg waar nodig `S3_REGION`, `S3_PATH_STYLE`, `S3_USE_TLS`, `PDF_AI_URL`, `PDF_AI_MODEL`, `TRANSACTION_AI_URL` en `TRANSACTION_AI_MODEL` toe. Garage gebruikt doorgaans path-style S3-toegang. Commit `.env`, `config/.env`, `.install/` en `config/garage/` nooit.
@@ -132,7 +132,7 @@ De belangrijkste controles zijn:
 go build ./...
 go test ./...
 ./scripts/check-local.sh
-docker build -t hohoho-check .
+docker build -t yohofa-check .
 ```
 
 `check-local.sh` gebruikt een tijdelijke SQLite-database en controleert onder andere objecten, waarden, transacties, bankimportdeduplicatie, dashboard en persistentie na herstart. De scriptcheck gebruikt geen echte S3-, AI- of backupcredentials.

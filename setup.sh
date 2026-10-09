@@ -127,8 +127,9 @@ AUTH_PASSWORD=$(prompt_secret "Wachtwoord voor YoHoFa" "$(get_env AUTH_PASSWORD)
 [ -n "$AUTH_USERNAME" ] || die "AUTH_USERNAME is verplicht"
 [ -n "$AUTH_PASSWORD" ] || die "AUTH_PASSWORD is verplicht"
 
-S3_BUCKET=$(prompt_default "S3 bucket" "$(get_env S3_BUCKET)")
-[ -n "$S3_BUCKET" ] || S3_BUCKET=hohoho-v3-documents
+default_bucket=$(get_env S3_BUCKET)
+[ -n "$default_bucket" ] || default_bucket=yohofa-docs
+S3_BUCKET=$(prompt_default "S3 bucket" "$default_bucket")
 validate_s3_bucket "$S3_BUCKET"
 
 if [ "$STORAGE_MODE" = "local-garage" ]; then
@@ -139,7 +140,7 @@ if [ "$STORAGE_MODE" = "local-garage" ]; then
   S3_CREATE_BUCKET=true
   default_access=$(get_env S3_ACCESS_KEY)
   default_secret=$(get_env S3_SECRET_KEY)
-  [ -n "$default_access" ] || default_access=hohoho-$(random_value | cut -c1-16)
+  [ -n "$default_access" ] || default_access=yohofa-$(random_value | cut -c1-16)
   [ -n "$default_secret" ] || default_secret=$(random_value)
   S3_ACCESS_KEY=$(prompt_default "Garage access key" "$default_access")
   S3_SECRET_KEY=$(prompt_secret "Garage secret key" "$default_secret")
