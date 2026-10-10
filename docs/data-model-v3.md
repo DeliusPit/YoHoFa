@@ -119,17 +119,17 @@ Alle waarden worden als historie opgeslagen. De actuele waarde is de waarde met 
 
 | Object | Waardedatum | `value_cents` |
 | --- | --- | ---: |
-| Woning Sögel | 2026-03-01 | 59850000 |
-| Woning Sögel | 2027-01-01 | 62500000 |
-| Hypotheek Sparda | 2026-03-01 | 14000000 |
-| Hypotheek Sparda | 2026-10-01 | 13400000 |
+| Woning | 2026-03-01 | 59850000 |
+| Woning | 2027-01-01 | 62500000 |
+| Hypotheek | 2026-03-01 | 14000000 |
+| Hypotheek | 2026-10-01 | 13400000 |
 
 Hetzelfde mechanisme dient voor woningwaarde, banksaldo, beleggingswaarde, restschuld en reserveringsbedrag. De SQL legt geen niet-negativiteitsconstraint op, zodat bijvoorbeeld ook een negatief banksaldo kan worden vastgelegd. Een waardesnapshot wordt niet automatisch bij alle historische transacties opgeteld.
 
 ### `bank_import_profiles`
 
 - `id`: identificatie.
-- `name`: menselijke profielnaam, bijvoorbeeld ABN CSV.
+- `name`:  profielnaam, bijvoorbeeld ABN CSV.
 - `source_format`: bronformaat, bijvoorbeeld `csv`.
 - `configuration`: JSON-weergave van het YAML-configuratiebestand uit `config/banks/` voor parsing en veldmapping.
 
@@ -139,7 +139,7 @@ Configuratievoorbeeld:
 
 ```yaml
 bank:
-  name: "Sparda-Bank West"
+  name: "Bank West"
 
 source:
   format: csv
@@ -191,75 +191,5 @@ De samengestelde primary key voorkomt dubbele relaties met dezelfde bron, hetzel
 
 Voorbeelden:
 
-- Hypotheek Sparda → `finances` → Woning Sögel.
-- Nieuw dak → `reserved_for` → Woning Sögel.
-- Benzine → `used_for` → Subaru.
-
-Maak geen enum of aparte relatietypetabel. Nieuwe relatietekst introduceert ook geen nieuw objecttype: de eindpunten blijven binnen de vijf financiële objecttypes.
-
-## 3. Belangrijke ontwerpregels
-
-1. Geen aparte categorieëntabel.
-2. Het financiële object is zelf de classificatie.
-3. `transactions` bevat geen `financial_object_id`.
-4. Transactie-objectkoppelingen lopen uitsluitend via `transaction_financial_objects`.
-5. `documents` bevat geen `financial_object_id`.
-6. Document-objectkoppelingen lopen uitsluitend via `document_financial_objects`.
-7. Eén transactie kan meerdere financiële objecten raken.
-8. Eén document kan meerdere financiële objecten raken.
-9. `financial_objects` bevat alleen generieke identiteit: type, naam, omschrijving.
-10. Geen woning-, bank-, hypotheek- of verzekeringsspecifieke velden op `financial_objects`.
-11. Waarden altijd via `object_values` opslaan.
-12. Bankspecifieke input altijd via `bank_import_profiles` configureren.
-13. Ruwe bankdata bewaren in `bank_import_rows`.
-14. De rest van de applicatie werkt uitsluitend met genormaliseerde `transactions`.
-15. `object_relations` bevat alleen relaties tussen financiële objecten onderling.
-16. Geen multi-household-schema: één deployment/database is één huishouden.
-17. Houd het model klein: alleen tabellen toevoegen als functionaliteit aantoonbaar niet met deze negen tabellen kan worden gerealiseerd.
-
-De kern heeft geen parent-hiërarchie, attributen-JSON, object-kind of lifecycle-model. Er zijn geen aparte dossiers, contracten, partijen, analyse- of importbatchtabellen. API en frontend gebruiken de kernbegrippen en mogen objecten per type tonen.
-
-## 4. Implementatie en vervolgstappen
-
-Gerealiseerd: `config.RuntimeFromEnv`, `store.OpenCore`, `httpserver.NewCore` en de nieuwe browserinterface. Schema-versie 7 wordt transactioneel aangemaakt zonder seeddata. De actieve startup opent alleen deze store en registreert geen v2-routes. Bankimportregels hebben een unieke fingerprint per profiel zodat herhaalde CSV-uploads geen dubbele transacties maken.
-
-| Onderdeel | Nodige verandering |
-| --- | --- |
-| Database | Een nieuwe, lege SQLite-database met de negen kerntabellen initialiseren; geen bestaande tabellen converteren |
-| Store-laag | Financiële objecten, transacties, documenten, waarden, importprofielen/-regels en de drie soorten koppelingen ondersteunen |
-| Classificatie | `transactions.category_id` vervangen door `transaction_financial_objects` |
-| Bankimport | Geconfigureerde CSV-profielen, ruwe regels, canonieke transacties en fingerprint-gebaseerde deduplicatie per profiel |
-| Waarden en relaties | Waardehistorie en object-objectrelaties generiek opslaan; actuele waarden op meest recente datum lezen |
-| Documentopslag | S3/Garage gebruiken voor nieuwe uploads; metadata en koppelingen in SQLite |
-| Document-AI | Lokale tekst/OCR en LLM-response expliciet mappen naar `extracted_text`, `translated_text`, `analysis_json` en gevalideerde document-objectkoppelingen |
-| HTTP API | Objectgerichte routes en koppelingen aanbieden; bestaande domeinroutes vervangen zodra de UI is omgezet |
-| Frontend | Beheer van de vijf objecttypes, waarden, relaties, importprofielen, transactie-/documentkoppeling en bedragstoewijzing; filters en rapporten daarop aanpassen |
-| Startup | `ensureSchema` en `seedDefaults` aanpassen zodat het oude model niet opnieuw wordt aangemaakt |
-| Opslag | Eén SQLite-implementatie en Garage/S3-documentstore; database-/objectbackendkeuzes en opslagprofielen vervangen |
-| Herstel en checks | Backup/herstel, startup en bestaande verificatiescripts op het vereenvoudigde schema afstemmen |
-
-De actieve basis zit in `internal/store/core.go`, `core_schema.sql`, `internal/httpserver/core.go`, `internal/config/runtime.go` en `web/src/main.js`. SQLite-schema-upgrades verlopen via `PRAGMA user_version`.
-
-## 5. Nieuwe, lege administratie
-
-De overstap is een vervanging van de applicatiestructuur, geen dataconversie. Bestaande transacties, documenten, waarden, dossiers en overige administratiegegevens worden niet meegenomen. Ook oude bankprofielen en seeds worden niet automatisch ingevoerd.
-
-Na het bouwen van de opslagbasis bestaan alle negen tabellen en hun foreign keys, maar bevatten ze geen records. Bij herstart blijft het nieuwe SQLite-bestand behouden. De oude startupcode mag daar geen v2-tabellen of voorbeeldgegevens aan toevoegen.
-
-De administratie wordt vervolgens vanuit de browser gevuld met financiële objecten, waarden, relaties, importprofielen, transacties en documenten. De nieuwe documentopslag krijgt een eigen lege bucket voor YoHoFa; het wissen van oude objecten richt zich uitsluitend op de oude YoHoFa-opslag, niet op andere Garage-buckets.
-
-Het SQL-model bepaalt geen valuta; de applicatie moet één expliciete bedrag-/valutaconventie gebruiken. Een reserveringsbedrag is geen vrij beschikbaar bezit; een positief opgeslagen schuld wordt bij nettovermogen afgetrokken.
-
-De foreign keys bepalen nog geen cascadegedrag: verwijderen van een gekoppeld object, document of transactie wordt standaard geblokkeerd. De applicatie moet ontkoppelen en verwijderen als expliciete acties behandelen.
-
-Een gewijzigde importconfiguratie verandert de reeds opgeslagen canonieke transacties niet. Het model bevat geen profielsnapshot: leg bij de implementatie vast hoe wijzigingen en opnieuw normaliseren worden behandeld. De SQL voorkomt ook niet zelfstandig dubbele imports; deduplicatiegedrag moet expliciet worden geïmplementeerd zonder het oude fingerprint-/batchmodel automatisch terug te brengen.
-
-## 6. Uitvoeringsvolgorde
-
-1. Leg de huidige code vast en ontwikkel v3 op `v3-simplification`; het besluit om leeg te starten staat hierboven.
-2. Bouw de nieuwe SQLite-schema-/storelaag, schemaversiebeheer en basis voor objecten, waarden en relaties. Start zonder records of oude seeds.
-3. Zet API, configureerbare import, document-AI en frontend om naar de negen tabellen.
-4. Verifieer met zelf aangemaakte testgegevens: allocaties, waardehistorie, relaties, importherkomst, documentinhoud, herstart en herstel.
-5. Deploy v3 met een lege administratie en ruim de vervangen code en oude YoHoFa-opslag als expliciete uitvoeringsstappen op.
-
-Acceptatie: de applicatie gebruikt operationeel uitsluitend deze negen domeintabellen in SQLite, valideert de vijf objecttypes, ondersteunt meerdere koppelingen per transactie/document, controleert volledige bedragstoewijzing en telt bedragen in rapportages niet dubbel. Waarden zijn historisch, objectrelatietypes zijn vrije tekst en bankverschillen komen uit profielen. Beschikbare originele bronregels blijven herleidbaar naar transacties. Eén database vertegenwoordigt één huishouden. Documenten staan in Garage/S3; de browserapp, startup en herstel werken via de nieuwe Compose-deployment.
+- Hypotheek Bank → `finances` → Woning .
+- Nieuw dak → `reserved_for` → Woning .
