@@ -33,15 +33,15 @@ De standaardinstallatie start YoHoFa met een lokale Garage/S3-container. Een rev
 1. Haal de repository op en ga naar de projectmap.
 
    ```sh
-   git clone <repository-url> geldzaken
-   cd geldzaken
+   git clone https://github.com/DeliusPit/YoHoFa
+   cd YoHoFa
    ```
 
    Bij een bestaande checkout:
 
    ```sh
    git pull
-   cd geldzaken
+   cd YoHoFa
    ```
 
 2. Draai de setup.
@@ -101,43 +101,13 @@ Gebruik `./setup.sh` alleen voor nieuwe installaties of wanneer je de basisconfi
 - De configuratiepagina toont de status van SQLite, S3, document-AI, transactie-AI en backup.
 - De backupsectie configureert de resticrepository, planning en retentie. Herstel vereist de bevestiging `HERSTEL` en wordt bij de volgende start uitgevoerd.
 
-Handige beheercommando's:
-
-```sh
-docker compose ps
-docker compose logs -f backend
-docker compose restart backend
-docker compose down
-```
-
 Als `./setup.sh` meldt dat Docker niet bereikbaar is, controleer dan of de Docker daemon draait en of de huidige gebruiker Docker mag gebruiken. Als `readyz` faalt maar `healthz` werkt, is SQLite bereikbaar maar S3/Garage waarschijnlijk niet correct geconfigureerd of niet bereikbaar.
 
 ## Ontwikkeling en verificatie
 
 Voor lokaal ontwikkelen zijn Go 1.25+ en Node.js 24+ nodig.
 
-```sh
-./scripts/dev-api.sh
-```
-
-Start voor frontendontwikkeling in een tweede terminal:
-
-```sh
-cd web
-npm ci
-npm run dev
-```
-
-De belangrijkste controles zijn:
-
-```sh
-go build ./...
-go test ./...
-./scripts/check-local.sh
-docker build -t yohofa-check .
-```
-
-`check-local.sh` gebruikt een tijdelijke SQLite-database en controleert onder andere objecten, waarden, transacties, bankimportdeduplicatie, dashboard en persistentie na herstart. De scriptcheck gebruikt geen echte S3-, AI- of backupcredentials.
+bankimportdeduplicatie, dashboard en persistentie na herstart. De scriptcheck gebruikt geen echte S3-, AI- of backupcredentials.
 
 ## Ontwerp en API
 
