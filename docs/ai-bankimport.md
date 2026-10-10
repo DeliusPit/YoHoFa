@@ -56,7 +56,7 @@ Als `amountCents` ontbreekt, gebruikt de import het volledige transactiebedrag a
 ## Validatie
 
 - Definitieve import vereist een geconfigureerde `TRANSACTION_AI_URL`.
-- Het model is configureerbaar. De UI haalt beschikbare modellen op uit `/v1/models`; standaard is `Qwen3.6-35B-A3B-Q4_K_M`.
+- Het model is configureerbaar. De UI haalt beschikbare modellen op uit `/v1/models'.
 - `financialObjectId` moet bestaan in de meegegeven categorieen.
 - Een rij zonder classificatie wordt wel geimporteerd, maar blijft ongealloceerd.
 - Ongeldige AI-output of een niet-bereikbare AI blokkeert de definitieve import.
